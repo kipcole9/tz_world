@@ -41,7 +41,7 @@ defmodule TzWorld.Mixfile do
       {:castore, "~> 0.1 or ~> 1.0", optional: true},
       {:certifi, "~> 2.5", optional: true},
       {:ex_doc, "~> 0.19", only: :dev, runtime: false},
-      {:dialyxir, "~> 1.0", only: :dev, runtime: false, optional: true},
+      {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false, optional: true},
       {:benchee, "~> 1.0", only: :dev, runtime: false}
     ]
   end
