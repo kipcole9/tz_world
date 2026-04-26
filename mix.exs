@@ -91,6 +91,7 @@ defmodule TzWorld.Mixfile do
     [
       source_ref: "v#{@version}",
       main: "readme",
+      formatters: ["html", "markdown"],
       extras: [
         "README.md",
         "LICENSE.md",
