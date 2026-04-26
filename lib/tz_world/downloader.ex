@@ -118,7 +118,7 @@ defmodule TzWorld.Downloader do
 
   defp get_releases(trace?) do
     with {:ok, json} <- get_url(@release_url),
-         {:ok, releases} <- Jason.decode(json) do
+         {:ok, releases} <- json_decode(json) do
       maybe_log(
         "Retrieved list of #{Enum.count(releases)} available timezone data releases.",
         trace?
@@ -126,6 +126,13 @@ defmodule TzWorld.Downloader do
 
       {:ok, releases}
     end
+  end
+
+  defp json_decode(json) do
+    {term, :ok, ""} = :json.decode(json, :ok, %{null: nil})
+    {:ok, term}
+  rescue
+    _ -> {:error, :invalid_json}
   end
 
   def get_url(url) do

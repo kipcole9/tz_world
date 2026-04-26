@@ -77,8 +77,8 @@ defmodule TzWorld.GeoData do
   end
 
   defp json_decode!(string) do
-    # {json, :ok, ""} = :json.decode(string, :ok, %{null: nil})
-    Jason.decode!(string)
+    {term, :ok, ""} = :json.decode(string, :ok, %{null: nil})
+    term
   end
 
   defp update_map_keys(%{properties: properties} = poly) do
