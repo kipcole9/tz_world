@@ -1,7 +1,7 @@
 defmodule TzWorld.Mixfile do
   use Mix.Project
 
-  @source_url "https://github.com/kimlai/tz_world"
+  @source_url "https://github.com/kipcole9/tz_world"
   @version "2.0.0"
 
   def project do
@@ -9,7 +9,7 @@ defmodule TzWorld.Mixfile do
       app: :tz_world,
       name: "TzWorld",
       version: @version,
-      elixir: "~> 1.10",
+      elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),

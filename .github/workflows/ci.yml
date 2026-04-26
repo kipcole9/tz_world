@@ -6,9 +6,9 @@ name: Elixir CI
 # different name for the main branch like "master" or "production".
 on:
   push:
-    branches: [ "master" ]  # adapt branch for project
+    branches: [ "main" ]
   pull_request:
-    branches: [ "master" ]  # adapt branch for project
+    branches: [ "main" ]
 
 # Sets the ENV `MIX_ENV` to `test` for running tests
 env:
@@ -22,21 +22,22 @@ jobs:
     runs-on: ubuntu-latest
     name: Test on OTP ${{matrix.otp}} / Elixir ${{matrix.elixir}}
     strategy:
+      fail-fast: false
       # Specify the OTP and Elixir versions to use when building
       # and running the workflow steps.
       matrix:
         include:
           # minimum required versions
-          - otp: "27.2.4"
-            elixir: "1.18.4-otp-27"
+          - otp: "26.2.5.6"
+            elixir: "1.17.2-otp-26"
+          - otp: "27.2"
+            elixir: "1.17.2-otp-27"
+          - otp: "27.2"
+            elixir: "1.18.1-otp-27"
           - otp: "28.3.1"
-            elixir: "1.18.4-otp-28"
-          - otp: "27.2.4"
-            elixir: "1.19.5-otp-27"
+            elixir: "1.19.4-otp-28"
           - otp: "28.3.1"
-            elixir: "1.19.5-otp-28"
-          - otp: "28.3.1"
-            elixir: "1.20.0-rc.1-otp-28"
+            elixir: "1.20.0-rc.4-otp-28"
             lint: true
     steps:
     # Step: Setup Elixir + Erlang image as the base.
@@ -48,12 +49,12 @@ jobs:
 
     # Step: Check out the code.
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     # Step: Define how to cache deps. Restores existing cache if present.
     - name: Cache deps
       id: cache-deps
-      uses: actions/cache@v3
+      uses: actions/cache@v5
       env:
         cache-name: cache-elixir-deps
       with:
@@ -67,7 +68,7 @@ jobs:
     # project's downloaded deps every run.
     - name: Cache compiled build
       id: cache-build
-      uses: actions/cache@v3
+      uses: actions/cache@v5
       env:
         cache-name: cache-compiled-build
       with:
@@ -86,6 +87,7 @@ jobs:
     # Customize this step if a different behavior is desired.
     - name: Compiles without warnings
       run: mix compile --warnings-as-errors
+      if: ${{ matrix.lint }}
 
     # Step: Check that the checked in code has already been formatted.
     # This step fails if something was found unformatted.
@@ -93,6 +95,7 @@ jobs:
     # - name: Check Formatting
     #   run: mix format --check-formatted
 
+    # Step: Download timezone shape data required by the test suite.
     - name: Download shape data
       run: mix tz_world.update
 
@@ -100,3 +103,7 @@ jobs:
     - name: Run tests
       run: mix test
 
+    # Step: Execute dialyzer.
+    - name: Run dialyzer
+      run: mix dialyzer
+      if: ${{ matrix.lint }}

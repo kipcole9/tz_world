@@ -3,7 +3,7 @@
 [![hex.pm](https://img.shields.io/hexpm/v/tz_world.svg)](https://hex.pm/packages/tz_world)
 [![hex.pm](https://img.shields.io/hexpm/dt/tz_world.svg)](https://hex.pm/packages/tz_world)
 [![hex.pm](https://img.shields.io/hexpm/l/tz_world.svg)](https://hex.pm/packages/tz_world)
-[![github.com](https://img.shields.io/github/last-commit/kimlai/tz_world.svg)](https://github.com/kimlai/tz_world)
+[![github.com](https://img.shields.io/github/last-commit/kipcole9/tz_world.svg)](https://github.com/kipcole9/tz_world)
 
 Resolve timezones from a location using data from the
 [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder)
