@@ -2,7 +2,7 @@
 
 ## Tz_World v2.0.0
 
-This is the changelog for Tz_World v2.0.0 released on April 26th, 2026. For older changelogs please consult the release tag on [GitHub](https://github.com/kipcole9/tz_world/tags).
+This is the changelog for Tz_World v2.0.0 released on April 27th, 2026. For older changelogs please consult the release tag on [GitHub](https://github.com/kipcole9/tz_world/tags).
 
 ### Enhancements
 
