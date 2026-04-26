@@ -58,6 +58,7 @@ defmodule TzWorld.Backend.SpatialIndex do
   @behaviour TzWorld.Backend
 
   use GenServer
+  require Logger
 
   alias TzWorld.{GeoData, SpatialIndex}
   alias Geo.Point
@@ -102,9 +103,25 @@ defmodule TzWorld.Backend.SpatialIndex do
     # Load synchronously so callers that bypass the GenServer mailbox
     # (timezone_at/1, all_timezones_at/1) see a populated
     # persistent_term as soon as start_link/1 returns.
+    #
+    # Missing data must not crash init: `mix tz_world.update` starts
+    # this backend before the data file exists on a fresh install, and
+    # users who add this backend to their supervision tree before
+    # running the update task should see a graceful degraded state
+    # rather than a supervisor boot failure. Lookups against an
+    # unloaded backend return `{:error, :enoent}`.
     case load_into_persistent_term() do
-      :ok -> {:ok, :ready}
-      error -> {:stop, error}
+      :ok ->
+        {:ok, :ready}
+
+      {:error, reason} ->
+        Logger.warning(
+          "[TzWorld.Backend.SpatialIndex] started without timezone data " <>
+            "(#{inspect(reason)}). Run `mix tz_world.update` to install " <>
+            "the data, then call `TzWorld.reload_timezone_data/0`."
+        )
+
+        {:ok, :unloaded}
     end
   end
 

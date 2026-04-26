@@ -3,7 +3,6 @@ defmodule TzWorld.GeoData do
 
   @compressed_data_file "timezones-geodata.etf.zip"
   @etf_data_file "timezones-geodata.etf"
-  @priv_path "./priv"
   @osm_srid 3857
 
   defdelegate version, to: TzWorld
@@ -25,10 +24,12 @@ defmodule TzWorld.GeoData do
     |> to_charlist
   end
 
+  # The archive entry name. We deliberately store the file with a bare
+  # name (no directory component) so `:zip.unzip/2` does not warn about
+  # absolute paths and so the archive is portable. The contents are
+  # always extracted to memory, so the entry name is purely cosmetic.
   def etf_data_path do
-    @priv_path
-    |> Path.join(@etf_data_file)
-    |> to_charlist()
+    to_charlist(@etf_data_file)
   end
 
   def generate_compressed_data(source_data, version, trace? \\ false)

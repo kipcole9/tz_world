@@ -43,15 +43,27 @@ defmodule TzWorld.SpatialIndexTest do
     end
 
     test "agrees on 1000 random points (uniformly distributed over the globe)" do
+      # Compare via `all_timezones_at` rather than `timezone_at`: where
+      # multiple zones overlap (e.g. Xinjiang has both Asia/Urumqi and
+      # Asia/Shanghai), `timezone_at` legitimately returns "the first
+      # match" and the two backends iterate shapes in different orders.
+      # The actual invariant we're verifying is that the spatial index
+      # surfaces the same *set* of candidate zones.
       points = TimezoneFixtures.random_points(1000)
 
+      # Compare as sets (uniq + sort): the reference backends emit the
+      # same `tzid` more than once for a MultiPolygon with several
+      # sub-polygons whose bboxes overlap the point. SpatialIndex
+      # dedupes by construction. Set equality is the right invariant.
       mismatches =
         for {lng, lat} <- points,
             point = %Geo.Point{coordinates: {lng, lat}},
-            reference = TzWorld.timezone_at(point, @reference),
-            spatial = TzWorld.timezone_at(point, TzWorld.Backend.SpatialIndex),
-            reference != spatial do
-          {lng, lat, reference, spatial}
+            {:ok, reference} = TzWorld.all_timezones_at(point, @reference),
+            {:ok, spatial} = TzWorld.all_timezones_at(point, TzWorld.Backend.SpatialIndex),
+            reference_set = reference |> Enum.uniq() |> Enum.sort(),
+            spatial_set = spatial |> Enum.uniq() |> Enum.sort(),
+            reference_set != spatial_set do
+          {lng, lat, reference_set, spatial_set}
         end
 
       assert mismatches == [],
