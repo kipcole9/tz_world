@@ -106,7 +106,8 @@ defmodule TzWorld.Downloader do
   def get_latest_release(latest_release, asset_url, trace? \\ false) do
     with {:ok, source_data} <- get_url(asset_url) do
       GeoData.generate_compressed_data(source_data, latest_release, trace?)
-      TzWorld.Backend.Dets.reload_timezone_data(trace?)
+      # Rebuild the on-disk DETS file used by the DETS/ETS-cache backends.
+      TzWorld.Backend.DetsWithIndexCache.reload_timezone_data()
     end
   end
 
@@ -629,8 +630,10 @@ defmodule TzWorld.Downloader do
   end
 
   defp secure_ssl? do
+    # System.get_env/2 always returns the default ("TRUE") when the var
+    # is unset, so the upcased value is always a binary — no `nil`
+    # branch is reachable.
     case String.upcase(System.get_env(@tzworld_unsafe_https, "TRUE")) do
-      nil -> true
       "FALSE" -> false
       "NIL" -> false
       _other -> true

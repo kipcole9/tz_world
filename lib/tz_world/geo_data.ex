@@ -31,7 +31,8 @@ defmodule TzWorld.GeoData do
     |> to_charlist()
   end
 
-  def generate_compressed_data(source_data, version, trace? \\ false) when is_list(source_data) do
+  def generate_compressed_data(source_data, version, trace? \\ false)
+      when is_list(source_data) or is_binary(source_data) do
     maybe_log("Transforming source data", trace?)
     binary_data = transform_source_data(source_data, version)
     maybe_log("Transformed source data", trace?)

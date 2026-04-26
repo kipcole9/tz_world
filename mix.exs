@@ -2,7 +2,7 @@ defmodule TzWorld.Mixfile do
   use Mix.Project
 
   @source_url "https://github.com/kimlai/tz_world"
-  @version "1.4.2"
+  @version "2.0.0"
 
   def project do
     [
@@ -11,6 +11,7 @@ defmodule TzWorld.Mixfile do
       version: @version,
       elixir: "~> 1.10",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       aliases: aliases(),
       docs: docs(),
@@ -28,6 +29,10 @@ defmodule TzWorld.Mixfile do
       extra_applications: [:logger, :public_key, :inets, :ssl]
     ]
   end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(:dev), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   defp deps do
     [

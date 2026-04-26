@@ -50,7 +50,9 @@ defmodule TzWorld.Backend.DetsWithIndexCache do
 
   @doc false
   def filename do
-    TzWorld.Backend.Dets.filename()
+    TzWorld.GeoData.data_dir()
+    |> Path.join("timezones-geodata.dets")
+    |> String.to_charlist()
   end
 
   @slots 800

@@ -52,7 +52,7 @@ defmodule TzWorld.Backend.EtsWithIndexCache do
 
   @doc false
   def load_geodata do
-    {:ok, t} = TzWorld.Backend.Dets.get_geodata_table()
+    {:ok, t} = TzWorld.Backend.DetsWithIndexCache.get_geodata_table()
     :dets.to_ets(t, __MODULE__)
   end
 

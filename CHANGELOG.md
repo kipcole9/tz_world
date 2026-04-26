@@ -1,5 +1,47 @@
 ## Changelog for Tz_World
 
+## Tz_World v2.0.0
+
+This is the changelog for Tz_World v2.0.0 released on April 26th, 2026. For older changelogs please consult the release tag on [GitHub](https://github.com/kimlai/tz_world/tags).
+
+### Enhancements
+
+* Adds `TzWorld.Backend.SpatialIndex`, a new backend that resolves timezones using a pure-Elixir R-tree (Sort-Tile-Recursive packed) held in `:persistent_term`. Lookups bypass the GenServer mailbox and read directly from `:persistent_term`, eliminating the linear bounding-box scan used by the previous backends.
+
+* `TzWorld.Backend.SpatialIndex` is now the default backend, and is the first entry in the default backend precedence list. Existing applications that do not pin `:default_backend` will pick it up automatically.
+
+* Benchmarked against the previous backends across a categorised fixture set (dense regions, sparse/large zones, small/thin zones, ocean points with no match, points adjacent to the international date line):
+
+  | Input category    | Speedup vs. the next-fastest existing backend |
+  | ----------------- | --------------------------------------------- |
+  | `ocean` (no-match)| 18.2×                                         |
+  | `sparse_or_large` | 1.64×                                         |
+  | `dense` (cities)  | 1.43×                                         |
+  | random uniform    | 1.42×                                         |
+  | `small_or_thin`   | 1.08×                                         |
+
+  The largest wins are on no-match queries: previously, points in the open ocean caused a full scan of every shape's bounding box; the R-tree exits at the root.
+
+* Adds `TzWorld.SpatialIndex`, a small standalone R-tree implementation (build + stab) used by the new backend.
+
+* Adds `TzWorld.TimezoneFixtures`, a categorised set of coordinate fixtures used by both the test suite and the benchmark.
+
+### Breaking Changes
+
+* Removes `TzWorld.Backend.Memory`. It is strictly dominated by `TzWorld.Backend.SpatialIndex` on every measured workload (same memory profile, faster lookups, no GenServer round-trip).
+
+* Removes `TzWorld.Backend.Ets`. Without an in-memory bbox index, every lookup on a no-match point performed a full ETS scan via match-spec — orders of magnitude slower than the index-cache variant or the new `SpatialIndex` backend. `TzWorld.Backend.EtsWithIndexCache` remains for users who want ETS-backed shape storage.
+
+* Removes `TzWorld.Backend.Dets`. Same reasoning as `Backend.Ets`. `TzWorld.Backend.DetsWithIndexCache` remains for users who want disk-backed shape storage.
+
+### Migration
+
+* Applications that did not configure `:default_backend` need no changes — `TzWorld.Backend.SpatialIndex` is selected automatically.
+
+* Applications that had `config :tz_world, default_backend: TzWorld.Backend.Memory` (or `Ets`, `Dets`) should switch to `TzWorld.Backend.SpatialIndex`, or to one of the remaining cache-backed alternatives (`EtsWithIndexCache`, `DetsWithIndexCache`).
+
+* Supervision trees that explicitly start `TzWorld.Backend.Memory`, `TzWorld.Backend.Ets`, or `TzWorld.Backend.Dets` should switch to `TzWorld.Backend.SpatialIndex` (or another remaining backend).
+
 ## Tz_World v1.4.2
 
 This is the changelog for Tz_World v1.4.2 released on January 19th, 2026.  For older changelogs please consult the release tag on [GitHub](https://github.com/kimlai/tz_world/tags)
