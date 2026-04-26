@@ -127,7 +127,7 @@ This is the changelog for Tz_World v1.2.0 released on October 12th, 2022.  For o
 
 ### Enhancements
 
-* Adds options to `mix tzworld.update` mix task:
+* Adds options to `mix tz_world.update` mix task:
   * `--include_oceans` will download a 10% larger geojson data set that covers the worlds oceans
   * `--force` will force a data update, even if the data is the latest release. This can be used
     to switch between data that includes oceans and that which does not.
