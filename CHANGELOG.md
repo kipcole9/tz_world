@@ -1,5 +1,17 @@
 ## Changelog for Tz_World
 
+## Tz_World v2.2.0
+
+This is the changelog for Tz_World v2.2.0released on April 28th, 2026. For older changelogs please consult the release tag on [GitHub](https://github.com/kipcole9/tz_world/tags).
+
+### Bug Fixes
+
+* `mix tz_world.update` now produces a single clear error instead of a long `File.Error` stack trace when the configured `:data_dir` does not exist. To create the directory automatically, pass `--force`. This affects users who set `:data_dir` to a path outside the package's `priv/` (e.g. an application-level data directory shared across releases).
+
+### Migration
+
+* If you set `config :tz_world, data_dir: "..."` to a directory that is not part of the build artifacts, run `mix tz_world.update --force` once on first install (or any install where the directory may not yet exist). The default `:data_dir` (the package's `priv/`) always exists and is unaffected.
+
 ## Tz_World v2.1.0
 
 This is the changelog for Tz_World v2.1.0 released on April 27th, 2026. For older changelogs please consult the release tag on [GitHub](https://github.com/kipcole9/tz_world/tags).
@@ -8,7 +20,7 @@ This is the changelog for Tz_World v2.1.0 released on April 27th, 2026. For olde
 
 THe primary focus in this release is peak memory used during the `mix tz_world.update` process. With the changes in this release, peak memory has been reduced from about 920Mb to about 70Mb.
 
-* On-disk data format upgraded; existing installations must run `mix tz_world.update` once after upgrading. 
+* On-disk data format upgraded; existing installations must run `mix tz_world.update` once after upgrading.
 
 * The :jason dependency has been removed in favour of the built-in :json module (with :json_polyfill on OTP < 27)."
 
@@ -88,7 +100,7 @@ config :tz_world,
 * Adds a `--trace` flag to `mix tz_world.update`. This flag will trigger additional logging during the update process including memory utilization on the BEAM.
 
 * Adds some memory use optimizations during the download process. Relates to #38 but likely does not fully solve this issue.
- 
+
 * Add support for [geo 4.0](https://github.com/felt/geo).
 
 ## Tz_World v1.3.3

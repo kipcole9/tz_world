@@ -117,11 +117,15 @@ mix tz_world.update
 
 This task will download, transform, zip and store the timezones Geo data. Depending on internet and computer speed this may take a few minutes.
 
-By default `mix tz_world.update` will download geojson data that does *not* include time zone information for the oceans. There are two optional parameters that are accepted by `mix tz_world.update` that can be used to configure the desired behaviour:
+By default `mix tz_world.update` will download geojson data that does *not* include time zone information for the oceans. The following optional flags configure its behaviour:
 
-* `--include-oceans` will download the geojson data, including data for the oceans. This give almost complete global coverage of time zone data.  The default is `--no-include-oceans` which does not include data that covers the oceans. The geojson data including the oceans is about 10% larger than the data that does not include the oceans.
+* `--include-oceans` (`-o`) will download the geojson data, including data for the oceans. This gives almost complete global coverage of time zone data. The default is `--no-include-oceans` which does not include data that covers the oceans. The geojson data including the oceans is about 10% larger than the data that does not include the oceans.
 
-* `--force` will force an update to the geojson data even if the installed data is the latest release. This option can be useful if you choose to switch from the data without ocean coverage to the data with ocean coverage (and the reverse). The default is `--no-force`.
+* `--force` (`-f`) does two things:
+    * Forces an update even if the currently installed data is already at the latest release. Useful when switching between including and excluding ocean coverage.
+    * Creates the directory configured under `:data_dir` if it does not yet exist. Without `--force` a missing `:data_dir` raises `File.Error` so that a misconfigured `:data_dir` is loud rather than silently materialised. Pass `--force` on the first install when you have set a custom `:data_dir` outside the build artifacts.
+
+* `--trace` (`-t`) emits debug-level progress logs (current memory usage, download / extract / parse phases).
 
 ### Updating the Timezone data
 

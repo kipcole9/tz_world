@@ -83,7 +83,7 @@ defmodule TzWorld.Downloader do
 
   def update_release(include_oceans?, true = _force_update?, trace?) do
     {latest_release, asset_url} = latest_release(include_oceans?)
-    get_and_load_latest_release(latest_release, asset_url, trace?)
+    get_and_load_latest_release(latest_release, asset_url, trace?, true)
   end
 
   def update_release(include_oceans?, false = _force_update?, trace?) do
@@ -103,13 +103,13 @@ defmodule TzWorld.Downloader do
     end
   end
 
-  def get_and_load_latest_release(latest_release, asset_url, trace?) do
-    with {:ok, _} <- get_latest_release(latest_release, asset_url, trace?) do
+  def get_and_load_latest_release(latest_release, asset_url, trace?, force? \\ false) do
+    with {:ok, _} <- get_latest_release(latest_release, asset_url, trace?, force?) do
       TzWorld.reload_timezone_data()
     end
   end
 
-  def get_latest_release(latest_release, asset_url, trace? \\ false) do
+  def get_latest_release(latest_release, asset_url, trace? \\ false, force? \\ false) do
     tmp_zip =
       Path.join(
         System.tmp_dir!(),
@@ -118,7 +118,7 @@ defmodule TzWorld.Downloader do
 
     try do
       with {:ok, _} <- stream_get_url(asset_url, tmp_zip, trace?) do
-        GeoData.generate_compressed_data(tmp_zip, latest_release, trace?)
+        GeoData.generate_compressed_data(tmp_zip, latest_release, trace?, force?)
         # Rebuild the on-disk DETS file used by the DETS/ETS-cache backends.
         TzWorld.Backend.DetsWithIndexCache.reload_timezone_data()
       end

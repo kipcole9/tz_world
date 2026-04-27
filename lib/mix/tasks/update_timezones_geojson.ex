@@ -2,14 +2,25 @@ defmodule Mix.Tasks.TzWorld.Update do
   @moduledoc """
   Downloads and installs the latest Timezone GeoJSON data.
 
-  ## Argument
+  ## Arguments
 
-  * `--include-oceans` Will include the geojson for
-    oceans in the downloaded data.
+  * `--include-oceans` (`-o`) will include the geojson for the oceans
+    in the downloaded data. The default is to download data without
+    ocean coverage.
 
-  * `--force` will force an update even if the data is
-    current. This can be used to force downloading data
-    including (or not including) time zone data for the oceans.
+  * `--force` (`-f`) does two things:
+      * Forces an update even if the currently installed data is
+        already at the latest release. Useful when switching
+        between including and excluding ocean coverage.
+      * Creates the directory configured under `:data_dir` if it
+        does not yet exist. Without `--force` a missing `:data_dir`
+        is reported as an error so a misconfigured `:data_dir` is
+        loud rather than silently materialised. Pass `--force` on
+        the first install when you have set a custom `:data_dir`
+        that is not part of the build artifacts.
+
+  * `--trace` (`-t`) emits debug-level progress logs (current memory
+    usage, download / extract / parse phases).
 
   """
 
@@ -52,7 +63,9 @@ defmodule Mix.Tasks.TzWorld.Update do
     start_applications()
 
     {latest_release, asset_url} = Downloader.latest_release(include_oceans?, trace?)
-    Downloader.get_latest_release(latest_release, asset_url, trace?)
+    # `--force` also creates the configured `:data_dir` if it does not
+    # exist (passed as the trailing `force?` arg).
+    Downloader.get_latest_release(latest_release, asset_url, trace?, true)
 
     :ok = TzWorld.Backend.SpatialIndex.stop()
     :ok = TzWorld.Backend.DetsWithIndexCache.stop()
