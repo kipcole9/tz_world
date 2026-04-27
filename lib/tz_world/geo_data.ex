@@ -66,66 +66,72 @@ defmodule TzWorld.GeoData do
     end
   end
 
+  # Streaming GeoJSON decode. Each Feature is converted to a Geo struct
+  # (with bounding box) the moment it finishes parsing, then handed to the
+  # parser as the value for that array slot. The full parsed JSON map is
+  # never materialized: at peak we hold only the accumulated list of Geo
+  # structs plus whatever object is currently being built.
   defp decode_json(json, version) do
-    json
-    |> json_decode!()
-    |> Geo.JSON.decode!()
-    |> Map.fetch!(:geometries)
-    |> Enum.map(&update_map_keys/1)
-    |> Enum.map(&calculate_bounding_box/1)
-    |> List.insert_at(0, version)
+    decoders = %{object_finish: &json_object_finish/2}
+    {%{"features" => shapes}, :ok, ""} = :json.decode(json, :ok, decoders)
+    [version | shapes]
   end
 
-  defp json_decode!(string) do
-    {term, :ok, ""} = :json.decode(string, :ok, %{null: nil})
-    term
+  defp json_object_finish(pairs, acc) do
+    map = :maps.from_list(pairs)
+
+    case map do
+      %{"type" => "Feature", "properties" => properties, "geometry" => geometry} ->
+        {build_shape(geometry, normalize_properties(properties)), acc}
+
+      other ->
+        {other, acc}
+    end
   end
 
-  defp update_map_keys(%{properties: properties} = poly) do
-    properties =
-      Enum.map(properties, fn
-        {"tzid", v} -> {:tzid, v}
-        other -> other
-      end)
-      |> Map.new()
-
-    %{poly | properties: properties, srid: @osm_srid}
+  defp normalize_properties(properties) do
+    Enum.into(properties, %{}, fn
+      {"tzid", v} -> {:tzid, v}
+      other -> other
+    end)
   end
 
-  defp calculate_bounding_box(
-         %Geo.Polygon{coordinates: [polygon | _holes], properties: properties} = poly
-       ) do
-    properties = Map.put(properties, :bounding_box, calculate_bounding_box(polygon))
+  defp build_shape(%{"type" => "Polygon", "coordinates" => rings}, properties) do
+    coordinates = Enum.map(rings, &ring_to_tuples/1)
+    [outer | _holes] = coordinates
 
-    %{poly | properties: properties}
+    %Geo.Polygon{
+      coordinates: coordinates,
+      srid: @osm_srid,
+      properties: Map.put(properties, :bounding_box, ring_bounding_box(outer))
+    }
   end
 
-  defp calculate_bounding_box(
-         %Geo.MultiPolygon{coordinates: polygons, properties: properties} = poly
-       ) do
-    bounding_boxes = Enum.map(polygons, &calculate_bounding_box/1)
-    properties = Map.put(properties, :bounding_box, bounding_boxes)
+  defp build_shape(%{"type" => "MultiPolygon", "coordinates" => polygons}, properties) do
+    coordinates = Enum.map(polygons, fn rings -> Enum.map(rings, &ring_to_tuples/1) end)
+    bounding_boxes = Enum.map(coordinates, fn [outer | _] -> ring_bounding_box(outer) end)
 
-    %{poly | properties: properties}
+    %Geo.MultiPolygon{
+      coordinates: coordinates,
+      srid: @osm_srid,
+      properties: Map.put(properties, :bounding_box, bounding_boxes)
+    }
   end
 
-  defp calculate_bounding_box([polygon | _holes]) when is_list(polygon) do
-    calculate_bounding_box(polygon)
+  defp ring_to_tuples(ring) do
+    Enum.map(ring, fn [x, y] -> {x, y} end)
   end
 
-  defp calculate_bounding_box(polygon) when is_list(polygon) do
+  defp ring_bounding_box(ring) do
     [{x_min, y_min}, {x_max, y_max}] =
-      Enum.reduce(polygon, [{180, 90}, {-180, -90}], fn
-        {x, y}, [{x_min, y_min}, {x_max, y_max}] ->
-          x_min = min(x, x_min)
-          y_min = min(y, y_min)
-          x_max = max(x, x_max)
-          y_max = max(y, y_max)
-
-          [{x_min, y_min}, {x_max, y_max}]
+      Enum.reduce(ring, [{180, 90}, {-180, -90}], fn
+        {x, y}, [{x_min_a, y_min_a}, {x_max_a, y_max_a}] ->
+          [{min(x, x_min_a), min(y, y_min_a)}, {max(x, x_max_a), max(y, y_max_a)}]
       end)
 
-    bounding_box = [{x_min, y_max}, {x_min, y_min}, {x_max, y_min}, {x_max, y_max}]
-    %Geo.Polygon{coordinates: [bounding_box], srid: @osm_srid}
+    %Geo.Polygon{
+      coordinates: [[{x_min, y_max}, {x_min, y_min}, {x_max, y_min}, {x_max, y_max}]],
+      srid: @osm_srid
+    }
   end
 end
