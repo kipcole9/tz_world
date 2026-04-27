@@ -23,13 +23,19 @@ defmodule TzWorld.Downloader do
 
   """
   def latest_release(include_oceans? \\ false, trace? \\ false) do
-    with {:ok, releases} <- get_releases(trace?) do
-      release = hd(releases)
-      release_number = Map.get(release, "name")
-      asset_name = asset_name(include_oceans?)
-      timezones_geojson_asset = find_asset(release, asset_name)
-      asset_url = Map.get(timezones_geojson_asset, "browser_download_url")
-      {release_number, asset_url}
+    case get_releases(trace?) do
+      {:ok, releases} ->
+        release = hd(releases)
+        release_number = Map.get(release, "name")
+        asset_name = asset_name(include_oceans?)
+        timezones_geojson_asset = find_asset(release, asset_name)
+        asset_url = Map.get(timezones_geojson_asset, "browser_download_url")
+        {release_number, asset_url}
+
+      {:error, reason} ->
+        raise RuntimeError,
+              "Failed to fetch the latest release information from " <>
+                "#{@release_url}: #{inspect(reason)}"
     end
   end
 
@@ -139,10 +145,18 @@ defmodule TzWorld.Downloader do
   end
 
   defp json_decode(json) do
-    {term, :ok, ""} = :json.decode(json, :ok, %{null: nil})
-    {:ok, term}
+    case :json.decode(json, :ok, %{null: nil}) do
+      {term, :ok, rest} ->
+        # Some servers include a trailing newline after the JSON body.
+        # Jason silently tolerated this; `:json` returns the leftover
+        # in `rest`. Allow whitespace-only trailers.
+        case String.trim(rest) do
+          "" -> {:ok, term}
+          leftover -> {:error, {:trailing_data, byte_size(leftover)}}
+        end
+    end
   rescue
-    _ -> {:error, :invalid_json}
+    e -> {:error, {:invalid_json, Exception.message(e)}}
   end
 
   def get_url(url) do
