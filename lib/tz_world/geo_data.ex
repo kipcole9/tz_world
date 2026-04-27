@@ -1,9 +1,20 @@
 defmodule TzWorld.GeoData do
   @moduledoc false
 
-  @compressed_data_file "timezones-geodata.etf.zip"
-  @etf_data_file "timezones-geodata.etf"
+  @compressed_data_file "timezones-geodata.tzw1"
   @osm_srid 3857
+
+  # On-disk format ("TZW1"): a gzip-compressed file containing
+  #
+  #   <<"TZW1">>                                            (4-byte magic)
+  #   <<vsize::16, version::binary-size(vsize)>>            (data version)
+  #   N times: <<rsize::32, term_to_binary(shape)::binary>> (shape records)
+  #   EOF
+  #
+  # The producer streams one shape at a time during JSON parsing; the
+  # reader yields shapes as a Stream. Neither side ever materializes
+  # the full shape list in memory.
+  @magic "TZW1"
 
   defdelegate version, to: TzWorld
   import TzWorld, only: [maybe_log: 2]
@@ -21,73 +32,172 @@ defmodule TzWorld.GeoData do
   def compressed_data_path do
     data_dir()
     |> Path.join(@compressed_data_file)
-    |> to_charlist
+    |> to_charlist()
   end
 
-  # The archive entry name. We deliberately store the file with a bare
-  # name (no directory component) so `:zip.unzip/2` does not warn about
-  # absolute paths and so the archive is portable. The contents are
-  # always extracted to memory, so the entry name is purely cosmetic.
-  def etf_data_path do
-    to_charlist(@etf_data_file)
-  end
+  @doc """
+  Transform a downloaded GeoJSON zip into the on-disk TZW1 file.
 
+  Each Feature is stream-decoded, converted to a `Geo.Polygon` /
+  `Geo.MultiPolygon` struct (with bounding box), and written to disk
+  immediately. Memory stays O(one shape) for the parse/transform/write
+  pipeline.
+  """
   def generate_compressed_data(source_data, version, trace? \\ false)
       when is_list(source_data) or is_binary(source_data) do
     maybe_log("Transforming source data", trace?)
-    binary_data = transform_source_data(source_data, version)
-    maybe_log("Transformed source data", trace?)
-    :erlang.garbage_collect()
-    :zip.zip(compressed_data_path(), [{etf_data_path(), binary_data}])
-    maybe_log("Compressed data into a zip file", trace?)
+    count = transform_source_data(source_data, version)
+    maybe_log("Wrote #{count} shapes to #{compressed_data_path()}", trace?)
+    :ok
   end
 
-  def load_compressed_data do
-    with {:ok, [{_, terms} | _rest]} <- :zip.unzip(compressed_data_path(), [:memory]) do
-      {:ok, :erlang.binary_to_term(terms)}
+  @doc """
+  Stream the shapes stored in the on-disk TZW1 file.
+
+  Returns `{:ok, version, stream}` where `stream` yields one shape at
+  a time. The underlying file handle is closed when the stream is
+  fully consumed or halted.
+  """
+  def stream_shapes do
+    path = compressed_data_path()
+
+    case File.open(path, [:read, :binary, :compressed]) do
+      {:ok, handle} ->
+        case read_header(handle) do
+          {:ok, version} ->
+            stream =
+              Stream.resource(
+                fn -> handle end,
+                &read_next_shape/1,
+                &File.close/1
+              )
+
+            {:ok, version, stream}
+
+          {:error, _} = error ->
+            File.close(handle)
+            error
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  @doc """
+  Read just the data version string from the on-disk TZW1 file
+  without iterating its shapes.
+  """
+  def stored_version do
+    path = compressed_data_path()
+
+    case File.open(path, [:read, :binary, :compressed]) do
+      {:ok, handle} ->
+        try do
+          read_header(handle)
+        after
+          File.close(handle)
+        end
+
+      {:error, _} = error ->
+        error
     end
   end
 
   def transform_source_data(source_data, version) when is_list(source_data) do
-    source_data
-    |> :erlang.list_to_binary()
-    |> transform_source_data(version)
+    transform_source_data(:erlang.list_to_binary(source_data), version)
   end
 
   def transform_source_data(source_data, version) when is_binary(source_data) do
     case :zip.unzip(source_data, [:memory]) do
-      {:ok, [{_, json} | _rest]} ->
-        json
-        |> decode_json(version)
-        |> :erlang.term_to_binary()
+      {:ok, [{_, json} | _]} ->
+        write_streaming(compressed_data_path(), version, json)
 
       error ->
         raise RuntimeError, "Unable to unzip downloaded data. Error: #{inspect(error)}"
     end
   end
 
-  # Streaming GeoJSON decode. Each Feature is converted to a Geo struct
-  # (with bounding box) the moment it finishes parsing, then handed to the
-  # parser as the value for that array slot. The full parsed JSON map is
-  # never materialized: at peak we hold only the accumulated list of Geo
-  # structs plus whatever object is currently being built.
-  defp decode_json(json, version) do
-    decoders = %{object_finish: &json_object_finish/2}
-    {%{"features" => shapes}, :ok, ""} = :json.decode(json, :ok, decoders)
-    [version | shapes]
-  end
+  defp write_streaming(path, version, json) do
+    handle = open_for_write!(path, version)
 
-  defp json_object_finish(pairs, acc) do
-    map = :maps.from_list(pairs)
-
-    case map do
-      %{"type" => "Feature", "properties" => properties, "geometry" => geometry} ->
-        {build_shape(geometry, normalize_properties(properties)), acc}
-
-      other ->
-        {other, acc}
+    try do
+      decode_and_stream(json, handle)
+    after
+      File.close(handle)
     end
   end
+
+  defp open_for_write!(path, version) when is_binary(version) do
+    handle = File.open!(path, [:write, :binary, :compressed])
+    :ok = IO.binwrite(handle, @magic)
+    :ok = IO.binwrite(handle, <<byte_size(version)::16, version::binary>>)
+    handle
+  end
+
+  defp decode_and_stream(json, handle) do
+    # The outer acc threaded through `:json` can't be used to count
+    # features: when the parser enters an array, the acc passed to
+    # object_finish is the array's accumulator (a list), not our state.
+    # Use :counters for a side-channel feature counter and leave the
+    # parser's acc untouched.
+    counter = :counters.new(1, [])
+    decoders = %{object_finish: build_object_finish(handle, counter)}
+    {_result, :ok, ""} = :json.decode(json, :ok, decoders)
+    :counters.get(counter, 1)
+  end
+
+  defp build_object_finish(handle, counter) do
+    fn pairs, acc ->
+      map = :maps.from_list(pairs)
+
+      case map do
+        %{"type" => "Feature", "properties" => properties, "geometry" => geometry} ->
+          shape = build_shape(geometry, normalize_properties(properties))
+          write_shape!(handle, shape)
+          :counters.add(counter, 1, 1)
+          {nil, acc}
+
+        other ->
+          {other, acc}
+      end
+    end
+  end
+
+  defp write_shape!(handle, shape) do
+    bin = :erlang.term_to_binary(shape)
+    :ok = IO.binwrite(handle, <<byte_size(bin)::32, bin::binary>>)
+  end
+
+  defp read_header(handle) do
+    with magic when magic == @magic <- IO.binread(handle, 4),
+         <<vsize::16>> <- IO.binread(handle, 2),
+         version when is_binary(version) and byte_size(version) == vsize <-
+           IO.binread(handle, vsize) do
+      {:ok, version}
+    else
+      :eof -> {:error, :empty_file}
+      _other -> {:error, :corrupt_header}
+    end
+  end
+
+  defp read_next_shape(handle) do
+    case IO.binread(handle, 4) do
+      :eof ->
+        {:halt, handle}
+
+      <<size::32>> ->
+        bin = IO.binread(handle, size)
+
+        if is_binary(bin) and byte_size(bin) == size do
+          {[:erlang.binary_to_term(bin)], handle}
+        else
+          raise RuntimeError, "Truncated shape record (expected #{size} bytes)"
+        end
+    end
+  end
+
+  # --- Hand-built Geo struct construction ---
 
   defp normalize_properties(properties) do
     Enum.into(properties, %{}, fn

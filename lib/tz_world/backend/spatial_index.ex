@@ -215,7 +215,8 @@ defmodule TzWorld.Backend.SpatialIndex do
   # --- Loader
 
   defp load_into_persistent_term do
-    with {:ok, [version | shapes]} <- GeoData.load_compressed_data() do
+    with {:ok, version, shapes_stream} <- GeoData.stream_shapes() do
+      shapes = Enum.to_list(shapes_stream)
       shapes_tuple = List.to_tuple(shapes)
 
       entries =
