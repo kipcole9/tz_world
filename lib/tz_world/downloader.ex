@@ -104,10 +104,20 @@ defmodule TzWorld.Downloader do
   end
 
   def get_latest_release(latest_release, asset_url, trace? \\ false) do
-    with {:ok, source_data} <- get_url(asset_url) do
-      GeoData.generate_compressed_data(source_data, latest_release, trace?)
-      # Rebuild the on-disk DETS file used by the DETS/ETS-cache backends.
-      TzWorld.Backend.DetsWithIndexCache.reload_timezone_data()
+    tmp_zip =
+      Path.join(
+        System.tmp_dir!(),
+        "tz_world_source_#{:erlang.unique_integer([:positive])}.zip"
+      )
+
+    try do
+      with {:ok, _} <- stream_get_url(asset_url, tmp_zip, trace?) do
+        GeoData.generate_compressed_data(tmp_zip, latest_release, trace?)
+        # Rebuild the on-disk DETS file used by the DETS/ETS-cache backends.
+        TzWorld.Backend.DetsWithIndexCache.reload_timezone_data()
+      end
+    after
+      File.rm(tmp_zip)
     end
   end
 
@@ -138,6 +148,58 @@ defmodule TzWorld.Downloader do
   def get_url(url) do
     headers = [{String.to_charlist("User-Agent"), user_agent()}]
     get({url, headers})
+  end
+
+  @doc """
+  Download `url` and write the response body directly to `path` without
+  buffering it in memory.
+
+  Returns `{:ok, path}` on success, `{:error, reason}` otherwise.
+  """
+  def stream_get_url(url, path, trace? \\ false) when is_binary(url) and is_binary(path) do
+    headers = [{String.to_charlist("User-Agent"), user_agent()}]
+    maybe_log("Streaming download from #{url} to #{path}", trace?)
+    stream_get({url, headers}, path, [])
+  end
+
+  defp stream_get({url, headers}, path, options) do
+    hostname = String.to_charlist(URI.parse(url).host)
+    url_charlist = String.to_charlist(url)
+    http_options = http_opts(hostname, options)
+    https_proxy = https_proxy(options)
+
+    if https_proxy do
+      case URI.parse(https_proxy) do
+        %{host: host, port: port} when is_binary(host) and is_integer(port) ->
+          :httpc.set_options([{:https_proxy, {{String.to_charlist(host), port}, []}}])
+
+        _other ->
+          Logger.bare_log(
+            :warning,
+            "https_proxy was set to an invalid value. Found #{inspect(https_proxy)}."
+          )
+      end
+    end
+
+    request_options = [stream: String.to_charlist(path)]
+
+    case :httpc.request(:get, {url_charlist, headers}, http_options, request_options) do
+      {:ok, :saved_to_file} ->
+        {:ok, path}
+
+      {:ok, {{_version, code, message}, _headers, _body}} ->
+        Logger.bare_log(
+          :error,
+          "Failed to download #{inspect(url)}. " <>
+            "HTTP Error: (#{code}) #{inspect(message)}"
+        )
+
+        {:error, code}
+
+      {:error, _} = error ->
+        Logger.bare_log(:error, "Failed to download #{inspect(url)}: #{inspect(error)}")
+        error
+    end
   end
 
   @doc """

@@ -15,6 +15,7 @@ defmodule TzWorld.GeoData do
   # reader yields shapes as a Stream. Neither side ever materializes
   # the full shape list in memory.
   @magic "TZW1"
+  @chunk_size 64 * 1024
 
   defdelegate version, to: TzWorld
   import TzWorld, only: [maybe_log: 2]
@@ -36,19 +37,66 @@ defmodule TzWorld.GeoData do
   end
 
   @doc """
-  Transform a downloaded GeoJSON zip into the on-disk TZW1 file.
+  Transform a downloaded GeoJSON source zip (already on disk at
+  `source_zip_path`) into the on-disk TZW1 file.
 
-  Each Feature is stream-decoded, converted to a `Geo.Polygon` /
-  `Geo.MultiPolygon` struct (with bounding box), and written to disk
-  immediately. Memory stays O(one shape) for the parse/transform/write
-  pipeline.
+  The source zip is unzipped to a tempdir, the resulting JSON is
+  parsed in fixed-size chunks via `:json.decode_start/3` +
+  `:json.decode_continue/2`, and each parsed Feature is converted to
+  a `Geo.Polygon` / `Geo.MultiPolygon` struct (with bounding box) and
+  written to disk immediately. The tempdir is removed on exit.
+
+  Memory stays bounded by one feature's coordinates plus the parser's
+  per-chunk buffer (default 64 KiB). The full source zip and the full
+  unzipped GeoJSON are never resident in memory.
   """
-  def generate_compressed_data(source_data, version, trace? \\ false)
-      when is_list(source_data) or is_binary(source_data) do
-    maybe_log("Transforming source data", trace?)
-    count = transform_source_data(source_data, version)
-    maybe_log("Wrote #{count} shapes to #{compressed_data_path()}", trace?)
-    :ok
+  def generate_compressed_data(source_zip_path, version, trace? \\ false)
+      when is_binary(source_zip_path) and is_binary(version) do
+    tmp_dir =
+      Path.join(
+        System.tmp_dir!(),
+        "tz_world_extract_#{:erlang.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(tmp_dir)
+
+    try do
+      maybe_log("Extracting #{source_zip_path} to #{tmp_dir}", trace?)
+      json_path = unzip_to_dir!(source_zip_path, tmp_dir)
+
+      maybe_log("Streaming JSON from #{json_path}", trace?)
+      count = transform_json_file(json_path, version)
+      maybe_log("Wrote #{count} shapes to #{compressed_data_path()}", trace?)
+      :ok
+    after
+      File.rm_rf!(tmp_dir)
+    end
+  end
+
+  defp unzip_to_dir!(zip_path, dir) do
+    case :zip.unzip(String.to_charlist(zip_path), [{:cwd, String.to_charlist(dir)}]) do
+      {:ok, [path | _]} ->
+        List.to_string(path)
+
+      error ->
+        raise RuntimeError, "Unable to unzip #{zip_path}. Error: #{inspect(error)}"
+    end
+  end
+
+  defp transform_json_file(json_path, version) do
+    json_handle = File.open!(json_path, [:read, :binary, :raw, {:read_ahead, @chunk_size}])
+
+    try do
+      out_handle = open_for_write!(compressed_data_path(), version)
+
+      try do
+        decode_and_stream_chunked(json_handle, out_handle)
+      after
+        File.close(out_handle)
+      end
+    after
+      File.close(json_handle)
+    end
   end
 
   @doc """
@@ -104,30 +152,6 @@ defmodule TzWorld.GeoData do
     end
   end
 
-  def transform_source_data(source_data, version) when is_list(source_data) do
-    transform_source_data(:erlang.list_to_binary(source_data), version)
-  end
-
-  def transform_source_data(source_data, version) when is_binary(source_data) do
-    case :zip.unzip(source_data, [:memory]) do
-      {:ok, [{_, json} | _]} ->
-        write_streaming(compressed_data_path(), version, json)
-
-      error ->
-        raise RuntimeError, "Unable to unzip downloaded data. Error: #{inspect(error)}"
-    end
-  end
-
-  defp write_streaming(path, version, json) do
-    handle = open_for_write!(path, version)
-
-    try do
-      decode_and_stream(json, handle)
-    after
-      File.close(handle)
-    end
-  end
-
   defp open_for_write!(path, version) when is_binary(version) do
     handle = File.open!(path, [:write, :binary, :compressed])
     :ok = IO.binwrite(handle, @magic)
@@ -135,16 +159,39 @@ defmodule TzWorld.GeoData do
     handle
   end
 
-  defp decode_and_stream(json, handle) do
+  defp decode_and_stream_chunked(json_handle, out_handle) do
     # The outer acc threaded through `:json` can't be used to count
     # features: when the parser enters an array, the acc passed to
     # object_finish is the array's accumulator (a list), not our state.
     # Use :counters for a side-channel feature counter and leave the
     # parser's acc untouched.
     counter = :counters.new(1, [])
-    decoders = %{object_finish: build_object_finish(handle, counter)}
-    {_result, :ok, ""} = :json.decode(json, :ok, decoders)
+    decoders = %{object_finish: build_object_finish(out_handle, counter)}
+
+    case IO.binread(json_handle, @chunk_size) do
+      :eof ->
+        raise RuntimeError, "Empty JSON input"
+
+      first_chunk when is_binary(first_chunk) ->
+        drive(json_handle, :json.decode_start(first_chunk, :ok, decoders))
+    end
+
     :counters.get(counter, 1)
+  end
+
+  # Parser already produced a final value — no more input needed.
+  defp drive(_json_handle, {_result, _acc, _rest}), do: :ok
+
+  # Parser wants more input. Feed the next chunk, or signal EOF.
+  defp drive(json_handle, {:continue, state}) do
+    case IO.binread(json_handle, @chunk_size) do
+      :eof ->
+        _ = :json.decode_continue(:end_of_input, state)
+        :ok
+
+      chunk when is_binary(chunk) ->
+        drive(json_handle, :json.decode_continue(chunk, state))
+    end
   end
 
   defp build_object_finish(handle, counter) do
