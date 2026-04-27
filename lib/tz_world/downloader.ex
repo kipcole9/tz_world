@@ -487,7 +487,10 @@ defmodule TzWorld.Downloader do
       end
     end
 
-    case :httpc.request(:get, {url, headers}, http_options, []) do
+    # body_format: :binary so callers (incl. :json.decode/3) get a binary,
+    # not a charlist. The default `:string` returns a list of integers,
+    # which Jason tolerated but :json does not.
+    case :httpc.request(:get, {url, headers}, http_options, body_format: :binary) do
       {:ok, {{_version, 200, _}, headers, body}} ->
         {:ok, headers, body}
 
