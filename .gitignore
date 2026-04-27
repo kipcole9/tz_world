@@ -22,6 +22,7 @@ erl_crash.dump
 /priv/timezones-geodata.etf.zip
 /priv/timezones-geodata.json.zip
 /priv/timezones-geodata.dets
+/priv/timezones-geodata.tzw1
 TIMEZONES_GEOJSON_VERSION
 
 # Mise

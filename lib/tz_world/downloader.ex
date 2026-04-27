@@ -23,13 +23,19 @@ defmodule TzWorld.Downloader do
 
   """
   def latest_release(include_oceans? \\ false, trace? \\ false) do
-    with {:ok, releases} <- get_releases(trace?) do
-      release = hd(releases)
-      release_number = Map.get(release, "name")
-      asset_name = asset_name(include_oceans?)
-      timezones_geojson_asset = find_asset(release, asset_name)
-      asset_url = Map.get(timezones_geojson_asset, "browser_download_url")
-      {release_number, asset_url}
+    case get_releases(trace?) do
+      {:ok, releases} ->
+        release = hd(releases)
+        release_number = Map.get(release, "name")
+        asset_name = asset_name(include_oceans?)
+        timezones_geojson_asset = find_asset(release, asset_name)
+        asset_url = Map.get(timezones_geojson_asset, "browser_download_url")
+        {release_number, asset_url}
+
+      {:error, reason} ->
+        raise RuntimeError,
+              "Failed to fetch the latest release information from " <>
+                "#{@release_url}: #{inspect(reason)}"
     end
   end
 
@@ -104,9 +110,20 @@ defmodule TzWorld.Downloader do
   end
 
   def get_latest_release(latest_release, asset_url, trace? \\ false) do
-    with {:ok, source_data} <- get_url(asset_url) do
-      GeoData.generate_compressed_data(source_data, latest_release, trace?)
-      TzWorld.Backend.Dets.reload_timezone_data(trace?)
+    tmp_zip =
+      Path.join(
+        System.tmp_dir!(),
+        "tz_world_source_#{:erlang.unique_integer([:positive])}.zip"
+      )
+
+    try do
+      with {:ok, _} <- stream_get_url(asset_url, tmp_zip, trace?) do
+        GeoData.generate_compressed_data(tmp_zip, latest_release, trace?)
+        # Rebuild the on-disk DETS file used by the DETS/ETS-cache backends.
+        TzWorld.Backend.DetsWithIndexCache.reload_timezone_data()
+      end
+    after
+      File.rm(tmp_zip)
     end
   end
 
@@ -117,7 +134,7 @@ defmodule TzWorld.Downloader do
 
   defp get_releases(trace?) do
     with {:ok, json} <- get_url(@release_url),
-         {:ok, releases} <- Jason.decode(json) do
+         {:ok, releases} <- json_decode(json) do
       maybe_log(
         "Retrieved list of #{Enum.count(releases)} available timezone data releases.",
         trace?
@@ -127,9 +144,76 @@ defmodule TzWorld.Downloader do
     end
   end
 
+  defp json_decode(json) do
+    case :json.decode(json, :ok, %{null: nil}) do
+      {term, :ok, rest} ->
+        # Some servers include a trailing newline after the JSON body.
+        # Jason silently tolerated this; `:json` returns the leftover
+        # in `rest`. Allow whitespace-only trailers.
+        case String.trim(rest) do
+          "" -> {:ok, term}
+          leftover -> {:error, {:trailing_data, byte_size(leftover)}}
+        end
+    end
+  rescue
+    e -> {:error, {:invalid_json, Exception.message(e)}}
+  end
+
   def get_url(url) do
     headers = [{String.to_charlist("User-Agent"), user_agent()}]
     get({url, headers})
+  end
+
+  @doc """
+  Download `url` and write the response body directly to `path` without
+  buffering it in memory.
+
+  Returns `{:ok, path}` on success, `{:error, reason}` otherwise.
+  """
+  def stream_get_url(url, path, trace? \\ false) when is_binary(url) and is_binary(path) do
+    headers = [{String.to_charlist("User-Agent"), user_agent()}]
+    maybe_log("Streaming download from #{url} to #{path}", trace?)
+    stream_get({url, headers}, path, [])
+  end
+
+  defp stream_get({url, headers}, path, options) do
+    hostname = String.to_charlist(URI.parse(url).host)
+    url_charlist = String.to_charlist(url)
+    http_options = http_opts(hostname, options)
+    https_proxy = https_proxy(options)
+
+    if https_proxy do
+      case URI.parse(https_proxy) do
+        %{host: host, port: port} when is_binary(host) and is_integer(port) ->
+          :httpc.set_options([{:https_proxy, {{String.to_charlist(host), port}, []}}])
+
+        _other ->
+          Logger.bare_log(
+            :warning,
+            "https_proxy was set to an invalid value. Found #{inspect(https_proxy)}."
+          )
+      end
+    end
+
+    request_options = [stream: String.to_charlist(path)]
+
+    case :httpc.request(:get, {url_charlist, headers}, http_options, request_options) do
+      {:ok, :saved_to_file} ->
+        {:ok, path}
+
+      {:ok, {{_version, code, message}, _headers, _body}} ->
+        Logger.bare_log(
+          :error,
+          "Failed to download #{inspect(url)}. " <>
+            "HTTP Error: (#{code}) #{inspect(message)}"
+        )
+
+        {:error, code}
+
+      {:error, _} = error ->
+        Logger.bare_log(:error, "Failed to download #{inspect(url)}: #{inspect(error)}")
+        error
+    end
   end
 
   @doc """
@@ -403,7 +487,10 @@ defmodule TzWorld.Downloader do
       end
     end
 
-    case :httpc.request(:get, {url, headers}, http_options, []) do
+    # body_format: :binary so callers (incl. :json.decode/3) get a binary,
+    # not a charlist. The default `:string` returns a list of integers,
+    # which Jason tolerated but :json does not.
+    case :httpc.request(:get, {url, headers}, http_options, body_format: :binary) do
       {:ok, {{_version, 200, _}, headers, body}} ->
         {:ok, headers, body}
 
@@ -629,8 +716,10 @@ defmodule TzWorld.Downloader do
   end
 
   defp secure_ssl? do
+    # System.get_env/2 always returns the default ("TRUE") when the var
+    # is unset, so the upcased value is always a binary — no `nil`
+    # branch is reachable.
     case String.upcase(System.get_env(@tzworld_unsafe_https, "TRUE")) do
-      nil -> true
       "FALSE" -> false
       "NIL" -> false
       _other -> true

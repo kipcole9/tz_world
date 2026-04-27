@@ -3,11 +3,15 @@
 [![hex.pm](https://img.shields.io/hexpm/v/tz_world.svg)](https://hex.pm/packages/tz_world)
 [![hex.pm](https://img.shields.io/hexpm/dt/tz_world.svg)](https://hex.pm/packages/tz_world)
 [![hex.pm](https://img.shields.io/hexpm/l/tz_world.svg)](https://hex.pm/packages/tz_world)
-[![github.com](https://img.shields.io/github/last-commit/kimlai/tz_world.svg)](https://github.com/kimlai/tz_world)
+[![github.com](https://img.shields.io/github/last-commit/kipcole9/tz_world.svg)](https://github.com/kipcole9/tz_world)
 
 Resolve timezones from a location using data from the
 [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder)
 project.
+
+> #### Upgrading from 1.x {: .warning}
+>
+> The on-disk data format changed in 2.x: `priv/timezones-geodata.tzw1` replaces `priv/timezones-geodata.etf.zip`. After upgrading you must run `mix tz_world.update` once to reinstall the data in the new format. Until you do, every lookup returns `{:error, :time_zone_not_found}`. The old `.etf.zip` and `.dets` files in `priv/` are no longer read and can be deleted to reclaim disk space (≈ 900 MB).
 
 ## Installation
 
@@ -16,7 +20,7 @@ Add `tz_world` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tz_world, "~> 1.3"}
+    {:tz_world, "~> 2.0"}
   ]
 end
 ```
@@ -35,7 +39,7 @@ There is no mandatory configuration required however four options may be configu
 config :tz_world,
   # Configure a custom TzWorld backend. It will be used
   # as the default backend in calls to `TzWorld.timezone_at/1`
-  backend: MyTzWorldBackend,
+  default_backend: MyTzWorldBackend,
   # The default is the `priv` directory of `:tz_world`
   data_dir: "geodata/directory",
   # The default is either the trust store included in the
@@ -51,7 +55,7 @@ config :tz_world,
 
 `TzWorld` provides alternative strategies for managing access to the backend data. Each backend is implemented as a `GenServer` that needs to be either manually started with `BackendModule.start_link/1` or preferably added to your application's supervision tree.
 
-The recommended backend is `TzWorld.Backend.EtsWithIndexCache` unless the host system is memory constrained in which case `TzWorld.Backend.DetsWithIndexCache` is recommended.
+The recommended backend is `TzWorld.Backend.SpatialIndex`. It is also the default — applications that do not pin `:default_backend` will pick it up automatically.
 
 For example:
 
@@ -64,7 +68,7 @@ defmodule MyApp.Application do
   def start(_type, _args) do
     children = [
       ...
-      TzWorld.Backend.EtsWithIndexCache
+      TzWorld.Backend.SpatialIndex
     ]
 
     opts = [strategy: :one_for_one, name: MyApp.Supervisor]
@@ -74,35 +78,32 @@ end
 ```
 The following backends are available:
 
-* `TzWorld.Backend.Memory` which retains all data in memory for fast (but *not*
-  fastest) performance at the expense of using approximately 1GB of memory
+* `TzWorld.Backend.SpatialIndex` (recommended, default) resolves a point by
+  querying an R-tree spatial index built once at startup and held in
+  `:persistent_term`. Lookups read directly from `:persistent_term` and bypass
+  the GenServer mailbox entirely. This is the fastest backend on every
+  benchmarked workload — and dramatically faster (≈18×) than any other
+  backend on no-match queries (e.g. ocean points), where the previous
+  bounding-box-scan algorithms had to walk every shape.
 
-* `TzWorld.Backend.Dets` which uses Erlang's `:dets` data store. This uses
-  negligible memory at the expense of slow access times (approximately 500ms in
-  testing)
+* `TzWorld.Backend.EtsWithIndexCache` keeps the timezone shapes in a
+  compressed `:ets` table, with an in-memory cache of every bounding box for
+  candidate filtering. Useful when you want shapes shared across processes
+  via `:ets` rather than via `:persistent_term`.
 
-* `TzWorld.Backend.DetsWithIndexCache` which balances memory usage and
-  performance. This backend is recommended in most situations since its
-  performance is similar to `TzWorld.Backend.Memory` (about 5% slower in
-  testing) and uses about 25Mb of memory
+* `TzWorld.Backend.DetsWithIndexCache` keeps the shapes on disk in a `:dets`
+  file, with the same in-memory bounding-box cache. Useful when memory is
+  constrained — only the index is kept in memory and shapes are loaded from
+  disk on demand.
 
-* `TzWorld.Backend.Ets` which uses `:ets` for storage. With the default
-  settings of `:compressed` for the `:ets` table its memory consumption is
-  about 512Mb  but with access that is over 20 times slower than
-  `TzWorld.Backend.DetsWithIndexCache`
-
-* `TzWorld.Backend.EtsWithIndexCache` which uses `:ets` for storage with an
-  additional in-memory cache of the bounding boxes. This still uses about 512Mb
-  but is faster than any of the other backends by about 40%
-  
 Other backends can be implemented as long as they follow the `TzWorld.Backend`
 behaviour. Custom backends should be configured in `config.exs` or `runtime.exs`
-under the `:backend` key so that it will be considered as the default for calls
-to `TzWorld.timezone_at/1`. For example:
+under the `:default_backend` key so that they will be considered as the default
+for calls to `TzWorld.timezone_at/1`. For example:
 
 ```elixir
 config :tz_world,
-  backend: MyTzWorldBackend
+  default_backend: MyTzWorldBackend
 ```
 
 ## Installing the Timezones Geo JSON data
@@ -147,3 +148,7 @@ iex> TzWorld.timezone_at(%Geo.PointZ{coordinates: {-74.006, 40.7128, 0.0}})
 iex> TzWorld.timezone_at(%Geo.Point{coordinates: {1.3, 65.62}})
 {:error, :time_zone_not_found}
 ```
+
+## Performance
+
+Version 2.0 lookups are 1.4×–18× faster than 1.x (R-tree spatial index), and `mix tz_world.update` peak memory is ≈ 13× lower (end-to-end streaming pipeline). See the [Performance guide](https://hexdocs.pm/tz_world/performance.html) for measurements and methodology.

@@ -9,11 +9,9 @@ defmodule TzWorld do
   @type backend :: module()
 
   @reload_backends [
-    TzWorld.Backend.Memory,
-    TzWorld.Backend.Dets,
-    TzWorld.Backend.DetsWithIndexCache,
-    TzWorld.Backend.Ets,
-    TzWorld.Backend.EtsWithIndexCache
+    TzWorld.Backend.SpatialIndex,
+    TzWorld.Backend.EtsWithIndexCache,
+    TzWorld.Backend.DetsWithIndexCache
   ]
 
   @doc """
@@ -232,11 +230,9 @@ defmodule TzWorld do
   end
 
   @default_backend_precedence [
+    TzWorld.Backend.SpatialIndex,
     TzWorld.Backend.EtsWithIndexCache,
-    TzWorld.Backend.Memory,
-    TzWorld.Backend.DetsWithIndexCache,
-    TzWorld.Backend.Ets,
-    TzWorld.Backend.Dets
+    TzWorld.Backend.DetsWithIndexCache
   ]
 
   def fetch_backend do

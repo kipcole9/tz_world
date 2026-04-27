@@ -54,8 +54,8 @@ defmodule Mix.Tasks.TzWorld.Update do
     {latest_release, asset_url} = Downloader.latest_release(include_oceans?, trace?)
     Downloader.get_latest_release(latest_release, asset_url, trace?)
 
-    :ok = TzWorld.Backend.Memory.stop()
-    :ok = TzWorld.Backend.Dets.stop()
+    :ok = TzWorld.Backend.SpatialIndex.stop()
+    :ok = TzWorld.Backend.DetsWithIndexCache.stop()
     :erlang.garbage_collect()
   end
 
@@ -92,7 +92,7 @@ defmodule Mix.Tasks.TzWorld.Update do
     {:ok, _} = Application.ensure_all_started(:ssl)
     {:module, _} = Code.ensure_loaded(:ssl_cipher)
 
-    TzWorld.Backend.Memory.start_link()
-    TzWorld.Backend.Dets.start_link()
+    TzWorld.Backend.SpatialIndex.start_link()
+    TzWorld.Backend.DetsWithIndexCache.start_link()
   end
 end

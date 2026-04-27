@@ -50,7 +50,9 @@ defmodule TzWorld.Backend.DetsWithIndexCache do
 
   @doc false
   def filename do
-    TzWorld.Backend.Dets.filename()
+    TzWorld.GeoData.data_dir()
+    |> Path.join("timezones-geodata.dets")
+    |> String.to_charlist()
   end
 
   @slots 800
@@ -70,12 +72,8 @@ defmodule TzWorld.Backend.DetsWithIndexCache do
     {:ok, t} = :dets.open_file(__MODULE__, dets_options)
     :ok = :dets.delete_all_objects(t)
 
-    {:ok, geodata} = TzWorld.GeoData.load_compressed_data()
-    [version | shapes] = geodata
-
-    for shape <- shapes do
-      add_to_dets(t, shape)
-    end
+    {:ok, version, shapes} = TzWorld.GeoData.stream_shapes()
+    Enum.each(shapes, &add_to_dets(t, &1))
 
     :ok = :dets.insert(t, {@tz_world_version, version})
     :dets.close(t)

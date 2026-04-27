@@ -1,16 +1,17 @@
 defmodule TzWorld.Mixfile do
   use Mix.Project
 
-  @source_url "https://github.com/kimlai/tz_world"
-  @version "1.4.2"
+  @source_url "https://github.com/kipcole9/tz_world"
+  @version "2.1.0"
 
   def project do
     [
       app: :tz_world,
       name: "TzWorld",
       version: @version,
-      elixir: "~> 1.10",
+      elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
+      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       aliases: aliases(),
       docs: docs(),
@@ -18,7 +19,7 @@ defmodule TzWorld.Mixfile do
       description: description(),
       package: package(),
       dialyzer: [
-        plt_add_apps: ~w(mix inets jason)a
+        plt_add_apps: ~w(mix inets)a
       ]
     ]
   end
@@ -29,16 +30,30 @@ defmodule TzWorld.Mixfile do
     ]
   end
 
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(:dev), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
   defp deps do
     [
       {:geo, "~> 1.0 or ~> 2.0 or ~> 3.3 or ~> 4.0"},
-      {:jason, "~> 1.0"},
       {:castore, "~> 0.1 or ~> 1.0", optional: true},
       {:certifi, "~> 2.5", optional: true},
       {:ex_doc, "~> 0.19", only: :dev, runtime: false},
-      {:dialyxir, "~> 1.0", only: :dev, runtime: false, optional: true},
+      {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false, optional: true},
       {:benchee, "~> 1.0", only: :dev, runtime: false}
-    ]
+    ] ++ maybe_add_json_polyfill()
+  end
+
+  # The Erlang :json module ships with OTP 27. On older OTP releases we
+  # pull in :json_polyfill, which exposes the identical :json module so
+  # call sites are version-agnostic.
+  defp maybe_add_json_polyfill do
+    if Code.ensure_loaded?(:json) do
+      []
+    else
+      [{:json_polyfill, "~> 0.2"}]
+    end
   end
 
   defp description do
@@ -55,6 +70,7 @@ defmodule TzWorld.Mixfile do
       files: [
         "lib",
         "config",
+        "guides",
         "mix.exs",
         "README*",
         "CHANGELOG*",
@@ -86,10 +102,15 @@ defmodule TzWorld.Mixfile do
     [
       source_ref: "v#{@version}",
       main: "readme",
+      formatters: ["html", "markdown"],
       extras: [
         "README.md",
+        "guides/performance.md",
         "LICENSE.md",
         "CHANGELOG.md"
+      ],
+      groups_for_extras: [
+        Guides: ~r"^guides/"
       ],
       skip_undefined_reference_warnings_on: ["CHANGELOG.md", "README.md"]
     ]
