@@ -4,6 +4,14 @@
 
 This is the changelog for Tz_World v2.0.0 released on April 27th, 2026. For older changelogs please consult the release tag on [GitHub](https://github.com/kipcole9/tz_world/tags).
 
+* On-disk data format upgraded; existing installations must run `mix tz_world.update` once after upgrading. 
+
+* The :jason dependency has been removed in favour of the built-in :json module (with :json_polyfill on OTP < 27)."
+
+## Tz_World v2.0.0
+
+This is the changelog for Tz_World v2.0.0 released on April 27th, 2026. For older changelogs please consult the release tag on [GitHub](https://github.com/kipcole9/tz_world/tags).
+
 ### Enhancements
 
 * Adds `TzWorld.Backend.SpatialIndex`, a new backend that resolves timezones using a pure-Elixir R-tree (Sort-Tile-Recursive packed) held in `:persistent_term`. Lookups bypass the GenServer mailbox and read directly from `:persistent_term`, eliminating the linear bounding-box scan used by the previous backends.

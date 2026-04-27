@@ -42,14 +42,14 @@ defmodule TzWorld.Mixfile do
       {:ex_doc, "~> 0.19", only: :dev, runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false, optional: true},
       {:benchee, "~> 1.0", only: :dev, runtime: false}
-    ] ++ json_polyfill_dep()
+    ] ++ maybe_add_json_polyfill()
   end
 
   # The Erlang :json module ships with OTP 27. On older OTP releases we
   # pull in :json_polyfill, which exposes the identical :json module so
   # call sites are version-agnostic.
-  defp json_polyfill_dep do
-    if String.to_integer(System.otp_release()) >= 27 do
+  defp maybe_add_json_polyfill do
+    if Code.ensure_loaded?(:json) do
       []
     else
       [{:json_polyfill, "~> 0.2"}]
