@@ -1,8 +1,12 @@
 ## Changelog for Tz_World
 
-## Tz_World v2.0.0
+## Tz_World v2.1.0
 
-This is the changelog for Tz_World v2.0.0 released on April 27th, 2026. For older changelogs please consult the release tag on [GitHub](https://github.com/kipcole9/tz_world/tags).
+This is the changelog for Tz_World v2.1.0 released on April 27th, 2026. For older changelogs please consult the release tag on [GitHub](https://github.com/kipcole9/tz_world/tags).
+
+### Enhancements
+
+THe primary focus in this release is peak memory used during the `mix tz_world.update` process. With the changes in this release, peak memory has been reduced from about 920Mb to about 70Mb.
 
 * On-disk data format upgraded; existing installations must run `mix tz_world.update` once after upgrading. 
 

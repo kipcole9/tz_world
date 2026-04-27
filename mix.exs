@@ -2,7 +2,7 @@ defmodule TzWorld.Mixfile do
   use Mix.Project
 
   @source_url "https://github.com/kipcole9/tz_world"
-  @version "2.0.0"
+  @version "2.1.0"
 
   def project do
     [
@@ -70,6 +70,7 @@ defmodule TzWorld.Mixfile do
       files: [
         "lib",
         "config",
+        "guides",
         "mix.exs",
         "README*",
         "CHANGELOG*",
@@ -104,8 +105,12 @@ defmodule TzWorld.Mixfile do
       formatters: ["html", "markdown"],
       extras: [
         "README.md",
+        "guides/performance.md",
         "LICENSE.md",
         "CHANGELOG.md"
+      ],
+      groups_for_extras: [
+        Guides: ~r"^guides/"
       ],
       skip_undefined_reference_warnings_on: ["CHANGELOG.md", "README.md"]
     ]
