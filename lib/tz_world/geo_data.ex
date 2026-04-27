@@ -50,7 +50,7 @@ defmodule TzWorld.GeoData do
   per-chunk buffer (default 64 KiB). The full source zip and the full
   unzipped GeoJSON are never resident in memory.
   """
-  def generate_compressed_data(source_zip_path, version, trace? \\ false)
+  def generate_compressed_data(source_zip_path, version, trace? \\ false, force? \\ false)
       when is_binary(source_zip_path) and is_binary(version) do
     tmp_dir =
       Path.join(
@@ -65,7 +65,7 @@ defmodule TzWorld.GeoData do
       json_path = unzip_to_dir!(source_zip_path, tmp_dir)
 
       maybe_log("Streaming JSON from #{json_path}", trace?)
-      count = transform_json_file(json_path, version)
+      count = transform_json_file(json_path, version, force?)
       maybe_log("Wrote #{count} shapes to #{compressed_data_path()}", trace?)
       :ok
     after
@@ -83,11 +83,11 @@ defmodule TzWorld.GeoData do
     end
   end
 
-  defp transform_json_file(json_path, version) do
+  defp transform_json_file(json_path, version, force?) do
     json_handle = File.open!(json_path, [:read, :binary, :raw, {:read_ahead, @chunk_size}])
 
     try do
-      out_handle = open_for_write!(compressed_data_path(), version)
+      out_handle = open_for_write!(compressed_data_path(), version, force?)
 
       try do
         decode_and_stream_chunked(json_handle, out_handle)
@@ -152,7 +152,12 @@ defmodule TzWorld.GeoData do
     end
   end
 
-  defp open_for_write!(path, version) when is_binary(version) do
+  defp open_for_write!(path, version, force?) when is_binary(version) and is_boolean(force?) do
+    # When `force?` is true, create any missing parent directories
+    # under the configured `:data_dir`. Without `force?` the writer
+    # surfaces the underlying File.Error so a misconfigured
+    # :data_dir is loud rather than silently materialised.
+    if force?, do: File.mkdir_p!(Path.dirname(path))
     handle = File.open!(path, [:write, :binary, :compressed])
     :ok = IO.binwrite(handle, @magic)
     :ok = IO.binwrite(handle, <<byte_size(version)::16, version::binary>>)
