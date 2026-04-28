@@ -4,6 +4,7 @@ defmodule TzWorld.Backend.EtsWithIndexCache do
   @behaviour TzWorld.Backend
 
   use GenServer
+  require Logger
 
   alias Geo.Point
 
@@ -52,17 +53,64 @@ defmodule TzWorld.Backend.EtsWithIndexCache do
 
   @doc false
   def load_geodata do
-    {:ok, t} = TzWorld.Backend.DetsWithIndexCache.get_geodata_table()
-    :dets.to_ets(t, __MODULE__)
+    case TzWorld.Backend.DetsWithIndexCache.get_geodata_table() do
+      {:ok, t} ->
+        # Clear any stale entries from a previous load. `:dets.to_ets/2`
+        # only inserts; without this, shapes that were removed upstream
+        # (or whose bounding-box key changed slightly between releases)
+        # would persist in ETS forever after a reload.
+        :ets.delete_all_objects(__MODULE__)
+        result = :dets.to_ets(t, __MODULE__)
+
+        # Release our reference to the DETS file. `:dets.open_file/2`
+        # ref-counts opens by name, so leaving this open would prevent
+        # `DetsWithIndexCache.reload_data` from later reopening the
+        # file in `:read_write` mode (failing with
+        # `:incompatible_arguments`). ETS lookups don't go through
+        # DETS, so we don't need it open between loads. Tolerate any
+        # close error — the table being already closed is harmless.
+        _ = :dets.close(t)
+
+        case result do
+          {:error, _} = error -> error
+          _ets_table -> :ok
+        end
+
+      {:error, _} = error ->
+        error
+    end
   end
 
   # --- Server callback implementation
 
   @doc false
   def handle_continue({:load_data, options}, _state) do
-    __MODULE__ = :ets.new(__MODULE__, options)
-    __MODULE__ = load_geodata()
-    {:noreply, get_index_cache()}
+    ensure_table!(options)
+
+    case load_geodata() do
+      :ok ->
+        {:noreply, get_index_cache()}
+
+      {:error, reason} ->
+        # Don't crash the supervisor on a missing or transiently
+        # unreadable DETS file. Mirror `SpatialIndex`'s behaviour:
+        # log a warning and stay alive in a degraded state. Lookups
+        # and `version/0` will return `{:error, :enoent}` until
+        # `reload_timezone_data/0` is called with valid data on disk.
+        Logger.warning(
+          "[TzWorld.Backend.EtsWithIndexCache] started without timezone data " <>
+            "(#{inspect(reason)})."
+        )
+
+        {:noreply, []}
+    end
+  end
+
+  defp ensure_table!(options) do
+    case :ets.whereis(__MODULE__) do
+      :undefined -> :ets.new(__MODULE__, options)
+      _ref -> __MODULE__
+    end
   end
 
   @doc false
@@ -77,13 +125,18 @@ defmodule TzWorld.Backend.EtsWithIndexCache do
 
   @doc false
   def handle_call(:version, _from, state) do
-    [{_, version}] = :ets.lookup(__MODULE__, @tz_world_version)
-    {:reply, {:ok, version}, state}
+    case :ets.lookup(__MODULE__, @tz_world_version) do
+      [{_, version}] -> {:reply, {:ok, version}, state}
+      [] -> {:reply, {:error, :enoent}, state}
+    end
   end
 
   @doc false
   def handle_call(:reload_data, _from, _state) do
-    {:reply, {:ok, load_geodata()}, get_index_cache()}
+    case load_geodata() do
+      :ok -> {:reply, {:ok, :loaded}, get_index_cache()}
+      {:error, _} = error -> {:reply, error, []}
+    end
   end
 
   defp find_zone(%Geo.Point{} = point, state) do

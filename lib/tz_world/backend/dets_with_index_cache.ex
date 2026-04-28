@@ -67,16 +67,38 @@ defmodule TzWorld.Backend.DetsWithIndexCache do
 
   @doc false
   def save_dets_geodata do
-    dets_options = Keyword.put(dets_options(), :access, :read_write)
+    live_path = filename()
+    unique = :erlang.unique_integer([:positive])
+    temp_path = ~c"#{live_path}.tmp.#{unique}"
+    temp_name = :"tz_world_dets_tmp_#{unique}"
 
-    {:ok, t} = :dets.open_file(__MODULE__, dets_options)
-    :ok = :dets.delete_all_objects(t)
+    options = [
+      file: temp_path,
+      access: :read_write,
+      estimated_no_objects: @slots
+    ]
 
-    {:ok, version, shapes} = TzWorld.GeoData.stream_shapes()
-    Enum.each(shapes, &add_to_dets(t, &1))
+    try do
+      {:ok, ^temp_name} = :dets.open_file(temp_name, options)
 
-    :ok = :dets.insert(t, {@tz_world_version, version})
-    :dets.close(t)
+      try do
+        {:ok, version, shapes} = TzWorld.GeoData.stream_shapes()
+        Enum.each(shapes, &add_to_dets(temp_name, &1))
+        :ok = :dets.insert(temp_name, {@tz_world_version, version})
+      after
+        :dets.close(temp_name)
+      end
+
+      # Atomic on POSIX: in-flight readers either retain a handle to
+      # the previous inode or open the new file. They never observe a
+      # half-written DETS file.
+      :ok = File.rename(List.to_string(temp_path), List.to_string(live_path))
+    rescue
+      error ->
+        _ = :dets.close(temp_name)
+        _ = File.rm(List.to_string(temp_path))
+        reraise error, __STACKTRACE__
+    end
   end
 
   defp add_to_dets(t, shape) do
@@ -134,14 +156,33 @@ defmodule TzWorld.Backend.DetsWithIndexCache do
 
   @doc false
   def handle_call(:reload_data, _from, {:error, :enoent}) do
+    drain_dets_closes(__MODULE__)
     :ok = save_dets_geodata()
     {:reply, get_geodata_table(), get_index_cache()}
   end
 
   def handle_call(:reload_data, _from, _state) do
-    :dets.close(__MODULE__)
+    drain_dets_closes(__MODULE__)
     :ok = save_dets_geodata()
     {:reply, get_geodata_table(), get_index_cache()}
+  end
+
+  # `:dets.open_file/2` ref-counts opens by name, so a single
+  # `:dets.close/1` only decrements by one. Other openers (e.g.
+  # `EtsWithIndexCache.load_geodata/0`) or stale refs from previous
+  # process lifecycles can leave the count above zero. Reopening with
+  # a different access mode (`:read_write`) while any `:read` open
+  # remains fails with `:incompatible_arguments`. Loop until `:dets`
+  # reports the table is no longer known.
+  defp drain_dets_closes(name) do
+    case :dets.info(name) do
+      :undefined ->
+        :ok
+
+      _info ->
+        _ = :dets.close(name)
+        drain_dets_closes(name)
+    end
   end
 
   @doc false

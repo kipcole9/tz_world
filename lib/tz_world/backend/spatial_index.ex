@@ -64,9 +64,14 @@ defmodule TzWorld.Backend.SpatialIndex do
   alias Geo.Point
 
   @timeout 10_000
-  @tree_key {__MODULE__, :tree}
-  @shapes_key {__MODULE__, :shapes}
-  @version_key {__MODULE__, :version}
+
+  # All loaded state lives under a single `:persistent_term` key so the
+  # reload swap is atomic: lookups always observe a consistent
+  # `{version, shapes_tuple, tree}` triple. Three separate puts (one per
+  # field) would (a) let lookups race with reload and walk an old tree
+  # against a new shapes tuple, and (b) trigger a global GC on every put
+  # rather than once per reload.
+  @index_key {__MODULE__, :index}
 
   @doc """
   Start the backend and bulk-load the spatial index.
@@ -127,9 +132,9 @@ defmodule TzWorld.Backend.SpatialIndex do
 
   @doc false
   def version do
-    case :persistent_term.get(@version_key, :__not_loaded__) do
-      :__not_loaded__ -> {:error, :enoent}
-      version -> {:ok, version}
+    case :persistent_term.get(@index_key, nil) do
+      nil -> {:error, :enoent}
+      {version, _shapes, _tree} -> {:ok, version}
     end
   end
 
@@ -182,12 +187,12 @@ defmodule TzWorld.Backend.SpatialIndex do
   # --- Lookup helpers
 
   defp fetch_index do
-    case :persistent_term.get(@tree_key, nil) do
+    case :persistent_term.get(@index_key, nil) do
       nil ->
         {:error, :enoent}
 
-      tree ->
-        {:ok, tree, :persistent_term.get(@shapes_key)}
+      {_version, shapes, tree} ->
+        {:ok, tree, shapes}
     end
   end
 
@@ -226,9 +231,9 @@ defmodule TzWorld.Backend.SpatialIndex do
 
       tree = SpatialIndex.build(entries)
 
-      :persistent_term.put(@version_key, version)
-      :persistent_term.put(@shapes_key, shapes_tuple)
-      :persistent_term.put(@tree_key, tree)
+      # Single atomic put: lookups either see the entire previous index
+      # or the entire new one, never a half-replaced state.
+      :persistent_term.put(@index_key, {version, shapes_tuple, tree})
 
       :ok
     end

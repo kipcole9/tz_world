@@ -8,10 +8,14 @@ defmodule TzWorld do
 
   @type backend :: module()
 
+  # Reload order matters: `EtsWithIndexCache.load_geodata/0` reads from
+  # the DETS file owned by `DetsWithIndexCache`, so DETS must be rebuilt
+  # first. `SpatialIndex` reads the on-disk `.tzw1` directly and is
+  # order-independent, so it goes last.
   @reload_backends [
-    TzWorld.Backend.SpatialIndex,
+    TzWorld.Backend.DetsWithIndexCache,
     TzWorld.Backend.EtsWithIndexCache,
-    TzWorld.Backend.DetsWithIndexCache
+    TzWorld.Backend.SpatialIndex
   ]
 
   @doc """
@@ -38,15 +42,93 @@ defmodule TzWorld do
   end
 
   @doc """
-  Reload the timezone geometry data.
+  Reload the timezone geometry data from the on-disk files.
 
-  This allows for the data to be reloaded,
-  typically with a new release, without
-  restarting the application.
+  Iterates the list of known backends and asks each one that is
+  *currently running in this node* to reload itself from disk.
+  Backends that are not running are skipped — the function is safe
+  to call regardless of which backends the host application has
+  added to its supervision tree.
+
+  ### Returns
+
+  * `{:ok, results}` when every running backend reloaded
+    successfully. `results` is a list of `{backend, result}` pairs
+    in reload order.
+
+  * `{:error, failures}` when one or more running backends failed
+    to reload. `failures` is a list of `{backend, reason}` pairs
+    for the backends that did not return `{:ok, _}`.
+
+  ### Notes
+
+  * Reload is performed sequentially in a fixed order
+    (`DetsWithIndexCache`, `EtsWithIndexCache`, `SpatialIndex`)
+    because `EtsWithIndexCache` reads from the DETS file rebuilt
+    by `DetsWithIndexCache`.
+
+  * Each backend's reload runs inside its own GenServer call, so
+    concurrent reload requests against a single backend are
+    serialized at its mailbox.
+
+  * Lookups during reload are safe: `SpatialIndex` swaps its
+    persistent-term entry atomically, and the other backends
+    process lookup messages only after the reload returns.
+
+  ### Telemetry
+
+  The reload emits the following events:
+
+  * `[:tz_world, :reload, :start | :stop | :exception]` — wraps the
+    full call. `:stop` measurements include `:duration`. `:stop`
+    metadata includes `:result` (the return value), `:backends`
+    (list of running backends that participated), and
+    `:failure_count`.
+
+  * `[:tz_world, :reload, :backend, :start | :stop | :exception]` —
+    wraps each per-backend reload. Metadata includes `:backend`
+    (the module). `:stop` metadata also includes `:result`.
+
+  ### Example
+
+      # An app running only the default backend
+      TzWorld.reload_timezone_data()
+      #=> {:ok, [{TzWorld.Backend.SpatialIndex, {:ok, :loaded}}]}
 
   """
+  @type backend_result :: {:ok, term()} | {:error, term()}
+  @spec reload_timezone_data() ::
+          {:ok, [{module(), backend_result}]} | {:error, [{module(), term()}]}
   def reload_timezone_data do
-    Enum.map(@reload_backends, fn backend -> apply(backend, :reload_timezone_data, []) end)
+    :telemetry.span([:tz_world, :reload], %{}, fn ->
+      results =
+        Enum.flat_map(@reload_backends, fn backend ->
+          case Process.whereis(backend) do
+            nil -> []
+            _pid -> [{backend, reload_backend(backend)}]
+          end
+        end)
+
+      failures =
+        Enum.reject(results, fn {_backend, result} -> match?({:ok, _}, result) end)
+
+      reply = if failures == [], do: {:ok, results}, else: {:error, failures}
+
+      stop_metadata = %{
+        result: reply,
+        backends: Enum.map(results, fn {backend, _} -> backend end),
+        failure_count: length(failures)
+      }
+
+      {reply, stop_metadata}
+    end)
+  end
+
+  defp reload_backend(backend) do
+    :telemetry.span([:tz_world, :reload, :backend], %{backend: backend}, fn ->
+      result = apply(backend, :reload_timezone_data, [])
+      {result, %{backend: backend, result: result}}
+    end)
   end
 
   @doc """

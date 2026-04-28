@@ -67,7 +67,6 @@ defmodule Mix.Tasks.TzWorld.Update do
     # exist (passed as the trailing `force?` arg).
     Downloader.get_latest_release(latest_release, asset_url, trace?, true)
 
-    :ok = TzWorld.Backend.SpatialIndex.stop()
     :ok = TzWorld.Backend.DetsWithIndexCache.stop()
     :erlang.garbage_collect()
   end
@@ -75,12 +74,13 @@ defmodule Mix.Tasks.TzWorld.Update do
   def update(include_oceans?, false = _force_update?, trace?) do
     start_applications()
 
-    case Downloader.current_release() do
+    case TzWorld.GeoData.stored_version() do
       {:ok, current_release} ->
         {latest_release, asset_url} = Downloader.latest_release(include_oceans?, trace?)
 
         if latest_release > current_release do
           Logger.info("#{@tag} Updating from release #{current_release} to #{latest_release}.")
+          ensure_data_dir!()
           Downloader.get_latest_release(latest_release, asset_url, trace?)
         else
           Logger.info(
@@ -88,14 +88,32 @@ defmodule Mix.Tasks.TzWorld.Update do
           )
         end
 
-      {:error, :enoent} ->
+      {:error, _reason} ->
         {latest_release, asset_url} = Downloader.latest_release(include_oceans?, trace?)
 
         Logger.info(
           "#{@tag} No timezone geo data installed. Installing the latest release #{latest_release}."
         )
 
+        ensure_data_dir!()
         Downloader.get_latest_release(latest_release, asset_url, trace?)
+    end
+  end
+
+  # Pre-flight check: bail with a clean Mix.raise (no stack trace, exit
+  # status 1) when the configured `:data_dir` doesn't exist and the user
+  # didn't pass `--force`. Only invoked from the non-force update path;
+  # `--force` self-heals by creating the directory downstream in
+  # `TzWorld.GeoData.open_for_write!/3`.
+  defp ensure_data_dir! do
+    data_dir = TzWorld.GeoData.data_dir()
+
+    unless File.dir?(data_dir) do
+      Mix.raise(
+        "#{@tag} Target directory #{inspect(data_dir)} does not exist " <>
+          "and --force option was not set. Cannot download timezone data. " <>
+          "Either create the directory or re-run with --force."
+      )
     end
   end
 
@@ -105,7 +123,15 @@ defmodule Mix.Tasks.TzWorld.Update do
     {:ok, _} = Application.ensure_all_started(:ssl)
     {:module, _} = Code.ensure_loaded(:ssl_cipher)
 
-    TzWorld.Backend.SpatialIndex.start_link()
+    # We deliberately do not start `TzWorld.Backend.SpatialIndex` here:
+    # its init logs a warning telling the user to run `mix tz_world.update`,
+    # which is exactly what they are already doing. Reading the installed
+    # version straight from disk via `TzWorld.GeoData.stored_version/0`
+    # avoids the noise and skips loading the shape data into
+    # `:persistent_term` only to discard it at task exit.
+    #
+    # `DetsWithIndexCache` is still required: the post-download rebuild
+    # goes through its GenServer (`reload_timezone_data/0`).
     TzWorld.Backend.DetsWithIndexCache.start_link()
   end
 end

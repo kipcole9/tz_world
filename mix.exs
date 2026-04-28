@@ -37,6 +37,7 @@ defmodule TzWorld.Mixfile do
   defp deps do
     [
       {:geo, "~> 1.0 or ~> 2.0 or ~> 3.3 or ~> 4.0"},
+      {:telemetry, "~> 1.0"},
       {:castore, "~> 0.1 or ~> 1.0", optional: true},
       {:certifi, "~> 2.5", optional: true},
       {:ex_doc, "~> 0.19", only: :dev, runtime: false},

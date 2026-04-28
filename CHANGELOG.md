@@ -1,5 +1,35 @@
 ## Changelog for Tz_World
 
+## Tz_World v2.3.0
+
+This is the changelog for Tz_World v2.3.0 released on April 29th, 2026.
+
+### Breaking Changes
+
+* `TzWorld.reload_timezone_data/0` now returns `{:ok, [{backend, result}, ...]}` or `{:error, [{backend, reason}, ...]}` instead of a bare list. Callers that pattern-matched the previous return shape need updating.
+
+* Adds `:telemetry ~> 1.0` as a runtime dependency.
+
+### Enhancements
+
+* `mix tz_world.update` fails fast with a clean error and exit 1 when the configured `:data_dir` does not exist. Pass `--force` to create it on the fly.
+
+* `TzWorld.reload_timezone_data/0` now actually works in every backend configuration: backends that aren't running are skipped instead of crashing the caller with `:noproc`. Reload also runs the backends in dependency-correct order (DETS before ETS).
+
+* On-disk `.tzw1` and `.dets` files are now written atomically (write-temp + rename in the same directory). Concurrent readers in another BEAM never observe a half-written file, even while `mix tz_world.update` is running.
+
+* Reload emits `[:tz_world, :reload, :start | :stop | :exception]` and `[:tz_world, :reload, :backend, :start | :stop | :exception]` telemetry events with `:duration` measurements and `:backend` / `:result` metadata.
+
+* `mix tz_world.update` no longer starts the `SpatialIndex` backend internally; the version check reads the on-disk header directly. This removes the misleading "started without timezone data — run `mix tz_world.update`" warning that the update task itself used to log.
+
+### Bug Fixes
+
+* Fixed `TzWorld.Backend.EtsWithIndexCache` retaining stale entries across reloads. Shapes removed upstream (or whose bounding-box keys changed) now actually disappear from the cache.
+
+* Fixed `TzWorld.Backend.SpatialIndex` reload briefly exposing an inconsistent index. The three persistent-term entries are packed into a single key so reload is an atomic swap.
+
+* Fixed `TzWorld.Backend.DetsWithIndexCache` reload failing with `:incompatible_arguments` when another opener held a reference to the live DETS file.
+
 ## Tz_World v2.2.0
 
 This is the changelog for Tz_World v2.2.0released on April 28th, 2026. For older changelogs please consult the release tag on [GitHub](https://github.com/kipcole9/tz_world/tags).

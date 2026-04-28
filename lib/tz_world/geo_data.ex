@@ -85,18 +85,39 @@ defmodule TzWorld.GeoData do
 
   defp transform_json_file(json_path, version, force?) do
     json_handle = File.open!(json_path, [:read, :binary, :raw, {:read_ahead, @chunk_size}])
+    final_path = compressed_data_path() |> List.to_string()
+    temp_path = "#{final_path}.tmp.#{:erlang.unique_integer([:positive])}"
 
     try do
-      out_handle = open_for_write!(compressed_data_path(), version, force?)
+      count = write_to_temp_then_rename!(json_handle, temp_path, final_path, version, force?)
+      count
+    after
+      File.close(json_handle)
+    end
+  end
 
+  # Stream the parsed shapes into `temp_path`, then atomically rename
+  # over `final_path`. This means readers (in this BEAM or another)
+  # never observe a partially-written file: they either keep their
+  # handle to the previous inode or open the new one in full. On any
+  # failure the temp file is cleaned up and `final_path` is left
+  # untouched.
+  defp write_to_temp_then_rename!(json_handle, temp_path, final_path, version, force?) do
+    out_handle = open_for_write!(temp_path, version, force?)
+
+    count =
       try do
         decode_and_stream_chunked(json_handle, out_handle)
       after
         File.close(out_handle)
       end
-    after
-      File.close(json_handle)
-    end
+
+    File.rename!(temp_path, final_path)
+    count
+  rescue
+    error ->
+      _ = File.rm(temp_path)
+      reraise error, __STACKTRACE__
   end
 
   @doc """

@@ -103,10 +103,12 @@ defmodule TzWorld.Downloader do
     end
   end
 
+  # Retained for backwards compatibility; behaviour is now identical
+  # to `get_latest_release/4` since the latter triggers a full
+  # `TzWorld.reload_timezone_data/0` after writing the new on-disk
+  # file.
   def get_and_load_latest_release(latest_release, asset_url, trace?, force? \\ false) do
-    with {:ok, _} <- get_latest_release(latest_release, asset_url, trace?, force?) do
-      TzWorld.reload_timezone_data()
-    end
+    get_latest_release(latest_release, asset_url, trace?, force?)
   end
 
   def get_latest_release(latest_release, asset_url, trace? \\ false, force? \\ false) do
@@ -119,8 +121,12 @@ defmodule TzWorld.Downloader do
     try do
       with {:ok, _} <- stream_get_url(asset_url, tmp_zip, trace?) do
         GeoData.generate_compressed_data(tmp_zip, latest_release, trace?, force?)
-        # Rebuild the on-disk DETS file used by the DETS/ETS-cache backends.
-        TzWorld.Backend.DetsWithIndexCache.reload_timezone_data()
+        # Reload every running backend from the new on-disk file. This
+        # rebuilds the DETS file (DetsWithIndexCache reload), refreshes
+        # the ETS cache (EtsWithIndexCache reload), and atomically swaps
+        # the SpatialIndex persistent_term entry. Backends that are not
+        # running in this node are skipped.
+        TzWorld.reload_timezone_data()
       end
     after
       File.rm(tmp_zip)
