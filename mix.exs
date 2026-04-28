@@ -2,7 +2,7 @@ defmodule TzWorld.Mixfile do
   use Mix.Project
 
   @source_url "https://github.com/kipcole9/tz_world"
-  @version "2.2.0"
+  @version "2.3.0"
 
   def project do
     [
