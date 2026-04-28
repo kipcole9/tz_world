@@ -76,16 +76,38 @@ defmodule Mix.Tasks.TzWorld.Update do
 
     case TzWorld.GeoData.stored_version() do
       {:ok, current_release} ->
-        {latest_release, asset_url} = Downloader.latest_release(include_oceans?, trace?)
+        cond do
+          dets_cache_missing?() ->
+            # The .tzw1 source-of-truth is on disk but the .dets cache
+            # the runtime backends read isn't. This typically happens
+            # after a previous update was interrupted between writing
+            # the .tzw1 and rebuilding the DETS file. Rebuild the cache
+            # locally — no network round-trip needed.
+            Logger.info(
+              "#{@tag} TZW1 data is installed (#{current_release}) but the DETS " <>
+                "cache at #{dets_cache_path()} is missing. Rebuilding the cache " <>
+                "from the existing .tzw1 file without re-downloading. Run " <>
+                "`mix tz_world.update` again afterwards if you also want to " <>
+                "check for a newer upstream release."
+            )
 
-        if latest_release > current_release do
-          Logger.info("#{@tag} Updating from release #{current_release} to #{latest_release}.")
-          ensure_data_dir!()
-          Downloader.get_latest_release(latest_release, asset_url, trace?)
-        else
-          Logger.info(
-            "#{@tag} Currently installed release #{current_release} is the latest release."
-          )
+            {:ok, _} = TzWorld.Backend.DetsWithIndexCache.reload_timezone_data()
+
+          true ->
+            {latest_release, asset_url} = Downloader.latest_release(include_oceans?, trace?)
+
+            if latest_release > current_release do
+              Logger.info(
+                "#{@tag} Updating from release #{current_release} to #{latest_release}."
+              )
+
+              ensure_data_dir!()
+              Downloader.get_latest_release(latest_release, asset_url, trace?)
+            else
+              Logger.info(
+                "#{@tag} Currently installed release #{current_release} is the latest release."
+              )
+            end
         end
 
       {:error, _reason} ->
@@ -98,6 +120,14 @@ defmodule Mix.Tasks.TzWorld.Update do
         ensure_data_dir!()
         Downloader.get_latest_release(latest_release, asset_url, trace?)
     end
+  end
+
+  defp dets_cache_missing? do
+    not File.exists?(dets_cache_path())
+  end
+
+  defp dets_cache_path do
+    TzWorld.Backend.DetsWithIndexCache.filename() |> List.to_string()
   end
 
   # Pre-flight check: bail with a clean Mix.raise (no stack trace, exit
