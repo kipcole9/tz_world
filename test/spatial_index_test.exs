@@ -3,15 +3,15 @@ defmodule TzWorld.SpatialIndexTest do
 
   alias TzWorld.TimezoneFixtures
 
-  # EtsWithIndexCache uses the same algorithm as the previous Memory
-  # backend (linear bbox scan + per-shape ray cast) but stores data in
-  # ETS. It serves as the independent reference against which the
-  # SpatialIndex backend is validated.
-  @reference TzWorld.Backend.EtsWithIndexCache
+  # `TzWorld.NaiveReference` is a linear bbox scan plus per-shape ray
+  # cast over the same `.tzw1` data the backend reads. It is the
+  # independent reference against which the SpatialIndex backend is
+  # validated, and depends on no backend of its own.
+  alias TzWorld.NaiveReference
 
   setup_all do
     TzWorld.Backend.SpatialIndex.start_link()
-    @reference.start_link()
+    NaiveReference.load()
     :ok
   end
 
@@ -29,11 +29,11 @@ defmodule TzWorld.SpatialIndexTest do
     end
   end
 
-  describe "agreement with reference backend" do
+  describe "agreement with the naive reference implementation" do
     test "agrees on every curated fixture" do
       for {lng, lat, _expected, label} <- TimezoneFixtures.all() do
         point = %Geo.Point{coordinates: {lng, lat}}
-        reference = TzWorld.timezone_at(point, @reference)
+        reference = NaiveReference.timezone_at(point)
         spatial = TzWorld.timezone_at(point, TzWorld.Backend.SpatialIndex)
 
         assert reference == spatial,
@@ -46,19 +46,20 @@ defmodule TzWorld.SpatialIndexTest do
       # Compare via `all_timezones_at` rather than `timezone_at`: where
       # multiple zones overlap (e.g. Xinjiang has both Asia/Urumqi and
       # Asia/Shanghai), `timezone_at` legitimately returns "the first
-      # match" and the two backends iterate shapes in different orders.
+      # match" and the two implementations iterate shapes in different
+      # orders.
       # The actual invariant we're verifying is that the spatial index
       # surfaces the same *set* of candidate zones.
       points = TimezoneFixtures.random_points(1000)
 
-      # Compare as sets (uniq + sort): the reference backends emit the
-      # same `tzid` more than once for a MultiPolygon with several
+      # Compare as sets (uniq + sort): the reference emits the same
+      # `tzid` more than once for a MultiPolygon with several
       # sub-polygons whose bboxes overlap the point. SpatialIndex
       # dedupes by construction. Set equality is the right invariant.
       mismatches =
         for {lng, lat} <- points,
             point = %Geo.Point{coordinates: {lng, lat}},
-            {:ok, reference} = TzWorld.all_timezones_at(point, @reference),
+            {:ok, reference} = NaiveReference.all_timezones_at(point),
             {:ok, spatial} = TzWorld.all_timezones_at(point, TzWorld.Backend.SpatialIndex),
             reference_set = reference |> Enum.uniq() |> Enum.sort(),
             spatial_set = spatial |> Enum.uniq() |> Enum.sort(),
@@ -73,7 +74,7 @@ defmodule TzWorld.SpatialIndexTest do
     test "all_timezones_at agrees on every curated fixture" do
       for {lng, lat, _expected, label} <- TimezoneFixtures.all() do
         point = %Geo.Point{coordinates: {lng, lat}}
-        {:ok, reference} = TzWorld.all_timezones_at(point, @reference)
+        {:ok, reference} = NaiveReference.all_timezones_at(point)
         {:ok, spatial} = TzWorld.all_timezones_at(point, TzWorld.Backend.SpatialIndex)
 
         assert Enum.sort(reference) == Enum.sort(spatial),

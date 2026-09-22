@@ -95,7 +95,9 @@ jobs:
     # - name: Check Formatting
     #   run: mix format --check-formatted
 
-    # Step: Download timezone shape data required by the test suite.
+    # Step: Download timezone shape data required by the test suite. The
+    # default `--backends spatial_index` writes only the .tzw1 file; the
+    # suite exercises no backend that needs the much larger .dets cache.
     - name: Download shape data
       run: mix tz_world.update
 

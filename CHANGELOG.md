@@ -1,5 +1,17 @@
 ## Changelog for Tz_World
 
+## Tz_World v2.4.0
+
+This is the changelog for Tz_World v2.4.0 released on September 22nd, 2026.
+
+### Breaking Changes
+
+* `mix tz_world.update` now accepts `--backends` and defaults to `spatial_index`, so it no longer builds the `timezones-geodata.dets` cache unless `dets` or `ets` is named. Applications using `TzWorld.Backend.DetsWithIndexCache` or `TzWorld.Backend.EtsWithIndexCache` must pass `--backends dets` (or `ets`) when updating their data.
+
+### Deprecations
+
+* `TzWorld.Backend.DetsWithIndexCache` and `TzWorld.Backend.EtsWithIndexCache` are deprecated and will be removed in the next release. Use `TzWorld.Backend.SpatialIndex`, which reads the `.tzw1` data directly and needs no DETS cache; starting either deprecated backend now logs an info message.
+
 ## Tz_World v2.3.0
 
 This is the changelog for Tz_World v2.3.0 released on April 29th, 2026.

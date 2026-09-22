@@ -27,3 +27,6 @@ TIMEZONES_GEOJSON_VERSION
 
 # Mise
 mise.toml
+
+# Session context written by Claude; personal, never committed.
+CLAUDE.local.md

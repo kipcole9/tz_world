@@ -1,5 +1,22 @@
 defmodule TzWorld.Backend.EtsWithIndexCache do
-  @moduledoc false
+  @moduledoc """
+  Resolves a timezone from a coordinate using an ETS table of timezone
+  shapes, populated from the DETS cache at startup.
+
+  > #### Deprecated {: .warning}
+  >
+  > This backend is deprecated and will be removed in the next release.
+  > Use `TzWorld.Backend.SpatialIndex` instead.
+  >
+  > This backend loads its ETS table from the DETS cache maintained by
+  > `TzWorld.Backend.DetsWithIndexCache`, so it carries that file's cost
+  > as well as its own. `SpatialIndex` reads the `.tzw1` data file
+  > directly and answers lookups from `:persistent_term`, needing
+  > neither the DETS cache nor a GenServer round trip.
+
+  """
+  @moduledoc deprecated:
+               "Use TzWorld.Backend.SpatialIndex instead. This backend will be removed in the next release."
 
   @behaviour TzWorld.Backend
 
@@ -25,6 +42,7 @@ defmodule TzWorld.Backend.EtsWithIndexCache do
 
   @doc false
   def init(options) do
+    log_deprecation()
     {:ok, [], {:continue, {:load_data, options}}}
   end
 
@@ -178,5 +196,12 @@ defmodule TzWorld.Backend.EtsWithIndexCache do
 
   def index_spec do
     [{{{:"$1", :"$2", :"$3", :"$4"}, :"$5"}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}]
+  end
+
+  defp log_deprecation do
+    Logger.info(
+      "[TzWorld] TzWorld.Backend.EtsWithIndexCache is deprecated and will be removed " <>
+        "in the next release. Use TzWorld.Backend.SpatialIndex instead."
+    )
   end
 end

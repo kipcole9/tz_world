@@ -2,10 +2,10 @@ defmodule TzWorldTest do
   use ExUnit.Case
   doctest TzWorld
 
+  # SpatialIndex is the only supported backend; the DETS and ETS backends
+  # are deprecated and removed in the next release.
   @backends [
-    TzWorld.Backend.SpatialIndex,
-    TzWorld.Backend.EtsWithIndexCache,
-    TzWorld.Backend.DetsWithIndexCache
+    TzWorld.Backend.SpatialIndex
   ]
 
   setup_all do

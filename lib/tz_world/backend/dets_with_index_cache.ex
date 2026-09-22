@@ -1,9 +1,27 @@
 defmodule TzWorld.Backend.DetsWithIndexCache do
-  @moduledoc false
+  @moduledoc """
+  Resolves a timezone from a coordinate using a DETS file of timezone
+  shapes together with an in-memory index of their bounding boxes.
+
+  > #### Deprecated {: .warning}
+  >
+  > This backend is deprecated and will be removed in the next release.
+  > Use `TzWorld.Backend.SpatialIndex` instead.
+  >
+  > `SpatialIndex` reads the `.tzw1` data file directly, so it does not
+  > need the separate DETS cache this backend maintains -- a file an
+  > order of magnitude larger than the data itself. It also answers
+  > lookups from `:persistent_term` rather than through a GenServer
+  > mailbox, so it is faster and has no single-process bottleneck.
+
+  """
+  @moduledoc deprecated:
+               "Use TzWorld.Backend.SpatialIndex instead. This backend will be removed in the next release."
 
   @behaviour TzWorld.Backend
 
   use GenServer
+  require Logger
 
   alias Geo.Point
 
@@ -22,6 +40,7 @@ defmodule TzWorld.Backend.DetsWithIndexCache do
 
   @doc false
   def init(_state) do
+    log_deprecation()
     {:ok, [], {:continue, :open_dets_file}}
   end
 
@@ -226,5 +245,12 @@ defmodule TzWorld.Backend.DetsWithIndexCache do
 
   def index_spec do
     [{{{:"$1", :"$2", :"$3", :"$4"}, :"$5"}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}]
+  end
+
+  defp log_deprecation do
+    Logger.info(
+      "[TzWorld] TzWorld.Backend.DetsWithIndexCache is deprecated and will be removed " <>
+        "in the next release. Use TzWorld.Backend.SpatialIndex instead."
+    )
   end
 end

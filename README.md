@@ -86,15 +86,21 @@ The following backends are available:
   backend on no-match queries (e.g. ocean points), where the previous
   bounding-box-scan algorithms had to walk every shape.
 
-* `TzWorld.Backend.EtsWithIndexCache` keeps the timezone shapes in a
-  compressed `:ets` table, with an in-memory cache of every bounding box for
-  candidate filtering. Useful when you want shapes shared across processes
-  via `:ets` rather than via `:persistent_term`.
+* `TzWorld.Backend.EtsWithIndexCache` (**deprecated**, removed in the next
+  release) keeps the timezone shapes in a compressed `:ets` table, with an
+  in-memory cache of every bounding box for candidate filtering. It is
+  populated from the `:dets` cache at startup, so it carries that file's
+  cost on top of its own — use `TzWorld.Backend.SpatialIndex` instead.
 
-* `TzWorld.Backend.DetsWithIndexCache` keeps the shapes on disk in a `:dets`
-  file, with the same in-memory bounding-box cache. Useful when memory is
-  constrained — only the index is kept in memory and shapes are loaded from
-  disk on demand.
+* `TzWorld.Backend.DetsWithIndexCache` (**deprecated**, removed in the next
+  release) keeps the shapes on disk in a `:dets` file, with the same
+  in-memory bounding-box cache. Use `TzWorld.Backend.SpatialIndex` instead,
+  which reads the `.tzw1` data directly and needs no separate cache — one
+  that is an order of magnitude larger than the data itself.
+
+Data for the deprecated backends is only built when `mix tz_world.update` is
+run with `--backends dets` (or `ets`); the default, `spatial_index`, does not
+build the `:dets` cache.
 
 Other backends can be implemented as long as they follow the `TzWorld.Backend`
 behaviour. Custom backends should be configured in `config.exs` or `runtime.exs`
