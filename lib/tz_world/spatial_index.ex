@@ -99,6 +99,12 @@ defmodule TzWorld.SpatialIndex do
   defp stab_children(_children, 0, _lng, _lat, acc), do: acc
 
   defp stab_children(children, n, lng, lat, acc) do
-    stab_children(children, n - 1, lng, lat, stab_node(:erlang.element(n, children), lng, lat, acc))
+    stab_children(
+      children,
+      n - 1,
+      lng,
+      lat,
+      stab_node(:erlang.element(n, children), lng, lat, acc)
+    )
   end
 end

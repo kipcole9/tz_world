@@ -718,7 +718,7 @@ defmodule TzWorld.Downloader do
   defp preferred_eccs do
     # TLS curves: X25519, prime256v1, secp384r1
     preferred_eccs = [:secp256r1, :secp384r1]
-    :ssl.eccs() -- :ssl.eccs() -- preferred_eccs
+    :ssl.eccs() -- (:ssl.eccs() -- preferred_eccs)
   end
 
   defp secure_ssl? do

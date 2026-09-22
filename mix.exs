@@ -113,6 +113,20 @@ defmodule TzWorld.Mixfile do
       groups_for_extras: [
         Guides: ~r"^guides/"
       ],
+      groups_for_modules: [
+        Backends: [
+          TzWorld.Backend,
+          TzWorld.Backend.SpatialIndex,
+          TzWorld.Backend.DetsWithIndexCache,
+          TzWorld.Backend.EtsWithIndexCache
+        ],
+        "Mix tasks": [
+          Mix.Tasks.TzWorld.Update
+        ],
+        Internals: [
+          TzWorld.Downloader
+        ]
+      ],
       skip_undefined_reference_warnings_on: ["CHANGELOG.md", "README.md"]
     ]
   end
