@@ -8,14 +8,54 @@ on:
 
 env:
   MIX_ENV: test
+  # The upstream time zone data release the test suite runs against. Bump it
+  # to test against a newer release; the cache key follows it.
+  TZ_WORLD_DATA_RELEASE: "2026d"
 
 permissions:
   contents: read
 
 jobs:
+  # Installs the time zone data once and caches it for every test job.
+  # `mix tz_world.update` looks up the latest release through the GitHub API,
+  # which rate limits by runner IP, so a cache miss in every matrix entry made
+  # CI fail at random. This job downloads the pinned release from its asset
+  # URL instead, which is not rate limited, and only on a cache miss.
+  data:
+    name: Time zone data
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Look up cached time zone data
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: priv/timezones-geodata.tzw1
+          key: tz-world-geodata-${{ env.TZ_WORLD_DATA_RELEASE }}
+          lookup-only: true
+
+      - name: Set up Elixir
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20-otp-29"
+          otp-version: "29"
+
+      - name: Install time zone data
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          DATA_URL: https://github.com/evansiroky/timezone-boundary-builder/releases/download/${{ env.TZ_WORLD_DATA_RELEASE }}/timezones.geojson.zip
+        run: |
+          mix deps.get
+          mix run -e '{:ok, _} = TzWorld.Downloader.get_latest_release(System.fetch_env!("TZ_WORLD_DATA_RELEASE"), System.fetch_env!("DATA_URL"))'
+
   test:
     name: "Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }}${{ matrix.lint && ' (lint)' || '' }}"
     runs-on: ubuntu-latest
+    needs: data
 
     strategy:
       fail-fast: false
@@ -86,11 +126,14 @@ jobs:
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
 
-      # Step: Download timezone shape data required by the test suite. The
-      # default `--backends spatial_index` writes only the .tzw1 file; the
-      # suite exercises no backend that needs the much larger .dets cache.
-      - name: Download shape data
-        run: mix tz_world.update
+      # The data job has cached it. The suite exercises no backend that needs
+      # the much larger .dets cache, so the .tzw1 file is all it restores.
+      - name: Restore time zone data
+        uses: actions/cache/restore@v5
+        with:
+          path: priv/timezones-geodata.tzw1
+          key: tz-world-geodata-${{ env.TZ_WORLD_DATA_RELEASE }}
+          fail-on-cache-miss: true
 
       - name: Run tests
         run: mix test
