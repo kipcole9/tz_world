@@ -239,10 +239,12 @@ defmodule TzWorld.Backend.DetsWithIndexCache do
     end)
   end
 
+  @doc false
   def get_index_cache do
     :dets.select(__MODULE__, index_spec())
   end
 
+  @doc false
   def index_spec do
     [{{{:"$1", :"$2", :"$3", :"$4"}, :"$5"}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}]
   end

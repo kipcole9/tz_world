@@ -13,6 +13,11 @@ live under `plans/`.
   and the rebuild note in `guides/performance.md`, plus the backend comparison
   in `benchee/backend.exs`. The test suite is already free of them.
 
+* [ ] **Return errors from `TzWorld.Downloader.latest_release/2`** — it raises when the
+  release list cannot be fetched, is empty, or lacks the expected asset, and
+  `update_release/1` and `mix tz_world.update` inherit the raise. Returning
+  `{:error, reason}` changes their return shapes, so it belongs in a minor release.
+
 ## Done
 
 * [x] **Faster, smaller time zone lookups** — packed, band-indexed rings compiled in

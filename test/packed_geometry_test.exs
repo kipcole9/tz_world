@@ -3,6 +3,8 @@ defmodule TzWorld.PackedGeometryTest do
 
   alias TzWorld.PackedGeometry
 
+  doctest TzWorld.PackedGeometry
+
   # `TzWorld.contains?/2` ray casts over every vertex of the original shape. It
   # is the reference: the compiled shape must give the same answer for every
   # point, including points on vertices, on edges and on band boundaries.

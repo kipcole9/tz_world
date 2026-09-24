@@ -92,10 +92,12 @@ defmodule Mix.Tasks.TzWorld.Update do
     end
   end
 
+  @doc false
   def update(include_oceans?, force_update?, trace?) do
     update(include_oceans?, force_update?, trace?, parse_backends(@default_backends))
   end
 
+  @doc false
   def update(include_oceans?, true = _force_update?, trace?, backends) do
     dets_required? = dets_required?(backends)
     start_applications(dets_required?)

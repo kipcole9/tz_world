@@ -1,7 +1,32 @@
 defmodule TzWorld.Downloader do
   @moduledoc """
-  Function to support downloading the latest
-  timezones geo JSON data
+  Downloads the time zone boundary data from the
+  [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder)
+  releases on GitHub.
+
+  `mix tz_world.update` is the usual way to install the data, and
+  `update_release/1` does the same from code.
+
+  ### Configuration
+
+  Downloads are made with `:httpc` over HTTPS, verifying the server's
+  certificate. They can be configured with:
+
+  * `config :tz_world, cacertfile: path` to name the certificate trust
+    store. Without it, the store from the `castore` or `certifi` package
+    is used if either is installed, and otherwise the first of several
+    well-known system locations that exists.
+
+  * `config :tz_world, https_proxy: url`, or the `HTTPS_PROXY` or
+    `https_proxy` environment variable, to download through a proxy.
+
+  * the `TZWORLD_HTTP_TIMEOUT` and `TZWORLD_HTTP_CONNECTION_TIMEOUT`
+    environment variables, in milliseconds, to change the request timeout
+    from 120,000 and the connection timeout from 60,000.
+
+  * the `TZWORLD_UNSAFE_HTTPS` environment variable, which turns off
+    certificate verification when it is set to anything other than an
+    empty string, `false` or `nil`. This is not recommended.
 
   """
 
@@ -18,8 +43,27 @@ defmodule TzWorld.Downloader do
   @tzworld_default_connection_timeout "60000"
 
   @doc """
-  Return the `{release_number, download_url}` of
-  the latest timezones geo JSON data
+  Returns the latest release of the time zone boundary data.
+
+  ### Arguments
+
+  * `include_oceans?` is a boolean. When `true` the download URL is for
+    the data that also covers the oceans. The default is `false`.
+
+  * `trace?` is a boolean. When `true` progress is logged at the debug
+    level. The default is `false`.
+
+  ### Returns
+
+  * `{release, url}` where `release` is the name of the release and `url`
+    is the download URL of its data.
+
+  A `RuntimeError` is raised if the list of releases cannot be fetched.
+
+  ### Examples
+
+      iex> TzWorld.Downloader.latest_release()
+      {"2026d", "https://github.com/evansiroky/timezone-boundary-builder/releases/download/2026d/timezones.geojson.zip"}
 
   """
   def latest_release(include_oceans? \\ false, trace? \\ false) do
@@ -43,34 +87,66 @@ defmodule TzWorld.Downloader do
   defp asset_name(false), do: @timezones_geojson
 
   @doc """
-  Returns the current installed timezones geo JSON
-  data.
+  Returns the release of the installed time zone boundary data.
+
+  The release is read from the installed data file, so no backend needs
+  to be running.
+
+  ### Returns
+
+  * `{:ok, release}` where `release` is the name of the release.
+
+  * `{:error, reason}` if no data is installed, when `reason` is
+    `:enoent`, or the installed file cannot be read.
+
+  ### Examples
+
+      iex> TzWorld.Downloader.current_release()
+      {:ok, "2026d"}
 
   """
   def current_release do
-    GeoData.version()
+    GeoData.stored_version()
   end
 
   @doc """
-  Updates the timezone geo JSON data if there
-  is a more recent release.
+  Installs the latest time zone boundary data if it is newer than the
+  installed data.
 
-  ## Arguments
+  The data is downloaded, compressed into the data directory and then
+  loaded into every running backend with `TzWorld.reload_timezone_data/0`.
 
-  * `options` is a keyword list of options. The
-    default is `[include_oceans: false, force: false]`.
+  ### Arguments
 
-  ## Options
+  * `options` is a keyword list of options.
 
-  * `:include_oceans` is a boolean that indicates whether
-    to include time zone data for the world's oceans. The
-    default is `false`.
+  ### Options
 
-  * `:force` is a boolean that indicates whether to force
-    an update of the data, even if the current data is the
-    latest release.  This option is useful when switching
-    from the data without oceans to the data with oceans
-    (or the other way arouond).
+  * `:include_oceans` is a boolean. When `true` the data that also covers
+    the oceans is installed. The default is `false`.
+
+  * `:force` is a boolean. When `true` the latest data is installed even
+    if it is already installed, which is how to switch between the data
+    with and without the oceans. The default is `false`.
+
+  * `:trace` is a boolean. When `true` progress is logged at the debug
+    level. The default is `false`.
+
+  ### Returns
+
+  * `{:ok, release}` if the installed data is already the latest release.
+
+  * The result of `TzWorld.reload_timezone_data/0` once the latest data
+    has been installed.
+
+  * `{:error, reason}` if the download fails.
+
+  A `RuntimeError` is raised if the list of releases cannot be fetched.
+
+  ### Examples
+
+      iex> TzWorld.Downloader.update_release()
+      {:ok, "2026d"}
 
   """
   def update_release(options \\ []) do
@@ -81,6 +157,7 @@ defmodule TzWorld.Downloader do
     update_release(include_oceans?, force_update?, trace?)
   end
 
+  @doc false
   def update_release(include_oceans?, true = _force_update?, trace?) do
     {latest_release, asset_url} = latest_release(include_oceans?)
     get_and_load_latest_release(latest_release, asset_url, trace?, true)
@@ -97,7 +174,8 @@ defmodule TzWorld.Downloader do
           {:ok, current_release}
         end
 
-      {:error, :enoent} ->
+      # Not installed, or the installed file cannot be read: install afresh.
+      {:error, _reason} ->
         {latest_release, asset_url} = latest_release(include_oceans?, trace?)
         get_and_load_latest_release(latest_release, asset_url, trace?)
     end
@@ -107,10 +185,12 @@ defmodule TzWorld.Downloader do
   # to `get_latest_release/4` since the latter triggers a full
   # `TzWorld.reload_timezone_data/0` after writing the new on-disk
   # file.
+  @doc false
   def get_and_load_latest_release(latest_release, asset_url, trace?, force? \\ false) do
     get_latest_release(latest_release, asset_url, trace?, force?)
   end
 
+  @doc false
   def get_latest_release(latest_release, asset_url, trace? \\ false, force? \\ false) do
     tmp_zip =
       Path.join(
@@ -165,16 +245,38 @@ defmodule TzWorld.Downloader do
     e -> {:error, {:invalid_json, Exception.message(e)}}
   end
 
+  @doc false
   def get_url(url) do
     headers = [{String.to_charlist("User-Agent"), user_agent()}]
     get({url, headers})
   end
 
   @doc """
-  Download `url` and write the response body directly to `path` without
-  buffering it in memory.
+  Downloads a URL to a file without holding the response in memory.
 
-  Returns `{:ok, path}` on success, `{:error, reason}` otherwise.
+  ### Arguments
+
+  * `url` is the URL to download.
+
+  * `path` is the path of the file the response body is written to.
+
+  * `trace?` is a boolean. When `true` the download is logged at the
+    debug level. The default is `false`.
+
+  ### Returns
+
+  * `{:ok, path}` once the response body has been written to `path`.
+
+  * `{:error, reason}` if the download fails, where `reason` is the HTTP
+    status code or the `:httpc` error. The failure is also logged.
+
+  ### Examples
+
+      iex> path = Path.join(System.tmp_dir!(), "example.html")
+      iex> {:ok, ^path} = TzWorld.Downloader.stream_get_url("https://example.com", path)
+      iex> File.exists?(path)
+      true
+
   """
   def stream_get_url(url, path, trace? \\ false) when is_binary(url) and is_binary(path) do
     headers = [{String.to_charlist("User-Agent"), user_agent()}]
@@ -223,106 +325,51 @@ defmodule TzWorld.Downloader do
   end
 
   @doc """
-  Securely download https content from
-  a URL.
+  Downloads the body of an HTTPS URL.
 
-  This function uses the built-in `:httpc`
-  client but enables certificate verification
-  which is not enabled by `:httc` by default.
-
-  See also https://erlef.github.io/security-wg/secure_coding_and_deployment_hardening/ssl
+  The request is made with `:httpc`, verifying the server's certificate as
+  the [EEF security guidelines](https://erlef.github.io/security-wg/secure_coding_and_deployment_hardening/ssl)
+  recommend. The trust store, proxy and timeouts are configured as the
+  module documentation describes.
 
   ### Arguments
 
-  * `url` is a binary URL or a `{url, list_of_headers}` tuple. If
-    provided the headers are a list of `{'header_name', 'header_value'}`
-    tuples. Note that the name and value are both charlists, not
-    strings.
+  * `url` is the URL as a string, or a `{url, headers}` tuple where
+    `headers` is a list of `{name, value}` tuples of charlists.
 
   * `options` is a keyword list of options.
 
   ### Options
 
-  * `:verify_peer` is a boolean value indicating
-    if peer verification should be done for this request.
-    The default is `true` in which case the default
-    `:ssl` options follow the [erlef guidelines](https://erlef.github.io/security-wg/secure_coding_and_deployment_hardening/ssl)
-    noted above.
+  * `:verify_peer` is a boolean. When `false` the server's certificate is
+    not verified. The default is `true`.
 
-  * `:timeout` is the number of milliseconds available
-    for the request to complete. The default is
-    #{inspect(@tzworld_default_timeout)}. This option may also be
-    set with the `CLDR_HTTP_TIMEOUT` environment variable.
+  * `:timeout` is the number of milliseconds the request may take. The
+    default is the value of `TZWORLD_HTTP_TIMEOUT`, or 120,000.
 
-  * `:connection_timeout` is the number of milliseconds
-    available for the a connection to be estabklished to
-    the remote host. The default is #{inspect(@tzworld_default_connection_timeout)}.
-    This option may also be set with the
-    `CLDR_HTTP_CONNECTION_TIMEOUT` environment variable.
+  * `:connection_timeout` is the number of milliseconds allowed to
+    connect to the server. The default is the value of
+    `TZWORLD_HTTP_CONNECTION_TIMEOUT`, or 60,000.
+
+  * `:https_proxy` is the URL of a proxy to download through. The default
+    is the configured `:https_proxy`, or the `HTTPS_PROXY` or
+    `https_proxy` environment variable.
 
   ### Returns
 
-  * `{:ok, body}` if the return is successful.
+  * `{:ok, body}` if the server responds with status 200.
 
-  * `{:not_modified, headers}` if the request would result in
-    returning the same results as one matching an etag.
+  * `{:not_modified, headers}` if the server responds with status 304,
+    which needs a conditional request header such as `If-None-Match`.
 
-  * `{:error, error}` if the download is
-     unsuccessful. An error will also be logged
-     in these cases.
+  * `{:error, reason}` otherwise, where `reason` is the HTTP status code
+    or the `:httpc` error. The failure is also logged.
 
-  ### Unsafe HTTPS
+  ### Examples
 
-  If the environment variable `CLDR_UNSAFE_HTTPS` is
-  set to anything other than `FALSE`, `false`, `nil`
-  or `NIL` then no peer verification of certificates
-  is performed. Setting this variable is not recommended
-  but may be required is where peer verification for
-  unidentified reasons. Please [open an issue](https://github.com/elixir-cldr/cldr/issues)
-  if this occurs.
-
-  ### Certificate stores
-
-  In order to keep dependencies to a minimum,
-  `get/1` attempts to locate an already installed
-  certificate store. It will try to locate a
-  store in the following order which is intended
-  to satisfy most host systems. The certificate
-  store is expected to be a path name on the
-  host system.
-
-  ```elixir
-  # A certificate store configured by the
-  # developer
-  Application.get_env(:ex_cldr, :cacertfile)
-
-  # Populated if hex package `CAStore` is configured
-  CAStore.file_path()
-
-  # Populated if hex package `certfi` is configured
-  :certifi.cacertfile()
-
-  # Debian/Ubuntu/Gentoo etc.
-  "/etc/ssl/certs/ca-certificates.crt",
-
-  # Fedora/RHEL 6
-  "/etc/pki/tls/certs/ca-bundle.crt",
-
-  # OpenSUSE
-  "/etc/ssl/ca-bundle.pem",
-
-  # OpenELEC
-  "/etc/pki/tls/cacert.pem",
-
-  # CentOS/RHEL 7
-  "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
-
-  # Open SSL on MacOS
-  "/usr/local/etc/openssl/cert.pem",
-
-  # MacOS & Alpine Linux
-  "/etc/ssl/cert.pem"
-  ```
+      iex> {:ok, body} = TzWorld.Downloader.get("https://example.com")
+      iex> String.starts_with?(body, "<!doctype html>")
+      true
 
   """
   @spec get(String.t() | {String.t(), list()}, options :: Keyword.t()) ::
@@ -346,124 +393,38 @@ defmodule TzWorld.Downloader do
   end
 
   @doc """
-  Securely download https content from
-  a URL.
+  Downloads the headers and body of an HTTPS URL.
 
-  This function uses the built-in `:httpc`
-  client but enables certificate verification
-  which is not enabled by `:httc` by default.
-
-  See also https://erlef.github.io/security-wg/secure_coding_and_deployment_hardening/ssl
+  The request is made as `get/2` describes.
 
   ### Arguments
 
-  * `url` is a binary URL or a `{url, list_of_headers}` tuple. If
-    provided the headers are a list of `{'header_name', 'header_value'}`
-    tuples. Note that the name and value are both charlists, not
-    strings.
+  * `url` is the URL as a string, or a `{url, headers}` tuple where
+    `headers` is a list of `{name, value}` tuples of charlists.
 
   * `options` is a keyword list of options.
 
   ### Options
 
-  * `:verify_peer` is a boolean value indicating
-    if peer verification should be done for this request.
-    The default is `true` in which case the default
-    `:ssl` options follow the [erlef guidelines](https://erlef.github.io/security-wg/secure_coding_and_deployment_hardening/ssl)
-    noted above.
-
-  * `:timeout` is the number of milliseconds available
-    for the request to complete. The default is
-    #{inspect(@tzworld_default_timeout)}. This option may also be
-    set with the `CLDR_HTTP_TIMEOUT` environment variable.
-
-  * `:connection_timeout` is the number of milliseconds
-    available for the a connection to be estabklished to
-    the remote host. The default is #{inspect(@tzworld_default_connection_timeout)}.
-    This option may also be set with the
-    `CLDR_HTTP_CONNECTION_TIMEOUT` environment variable.
-
-  * `:https_proxy` is the URL of an https proxy to be used. The
-    default is `nil`.
+  * The options are those of `get/2`.
 
   ### Returns
 
-  * `{:ok, body, headers}` if the return is successful.
+  * `{:ok, headers, body}` if the server responds with status 200, where
+    `headers` is a list of `{name, value}` tuples of charlists.
 
-  * `{:not_modified, headers}` if the request would result in
-    returning the same results as one matching an etag.
+  * `{:not_modified, headers}` if the server responds with status 304.
 
-  * `{:error, error}` if the download is
-     unsuccessful. An error will also be logged
-     in these cases.
+  * `{:error, reason}` otherwise, where `reason` is the HTTP status code
+    or the `:httpc` error. The failure is also logged.
 
-  ### Unsafe HTTPS
+  ### Examples
 
-  If the environment variable `CLDR_UNSAFE_HTTPS` is
-  set to anything other than `FALSE`, `false`, `nil`
-  or `NIL` then no peer verification of certificates
-  is performed. Setting this variable is not recommended
-  but may be required is where peer verification for
-  unidentified reasons. Please [open an issue](https://github.com/elixir-cldr/cldr/issues)
-  if this occurs.
-
-  ### Https Proxy
-
-  `Cldr.Http.get/2` will look for a proxy URL in the following
-  locales in the order presented:
-
-  * `options[:https_proxy]`
-  * `ex_cldr` compile-time configuration under the
-    key `:ex_cldr[:https_proxy]`
-  * The environment variable `HTTPS_PROXY`
-  * The environment variable `https_proxy`
-
-  ### Certificate stores
-
-  In order to keep dependencies to a minimum,
-  `get/1` attempts to locate an already installed
-  certificate store. It will try to locate a
-  store in the following order which is intended
-  to satisfy most host systems. The certificate
-  store is expected to be a path name on the
-  host system.
-
-  ```elixir
-  # A certificate store configured by the
-  # developer
-  Application.get_env(:ex_cldr, :cacertfile)
-
-  # Populated if hex package `CAStore` is configured
-  CAStore.file_path()
-
-  # Populated if hex package `certfi` is configured
-  :certifi.cacertfile()
-
-  # Debian/Ubuntu/Gentoo etc.
-  "/etc/ssl/certs/ca-certificates.crt",
-
-  # Fedora/RHEL 6
-  "/etc/pki/tls/certs/ca-bundle.crt",
-
-  # OpenSUSE
-  "/etc/ssl/ca-bundle.pem",
-
-  # OpenELEC
-  "/etc/pki/tls/cacert.pem",
-
-  # CentOS/RHEL 7
-  "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
-
-  # Open SSL on MacOS
-  "/usr/local/etc/openssl/cert.pem",
-
-  # MacOS & Alpine Linux
-  "/etc/ssl/cert.pem"
-  ```
+      iex> {:ok, headers, _body} = TzWorld.Downloader.get_with_headers("https://example.com")
+      iex> List.keymember?(headers, ~c"content-type", 0)
+      true
 
   """
-  @doc since: "2.21.0"
-
   @spec get_with_headers(String.t() | {String.t(), list()}, options :: Keyword.t()) ::
           {:ok, list(), binary} | {:not_modified, any()} | {:error, any}
 
@@ -546,6 +507,14 @@ defmodule TzWorld.Downloader do
         )
 
         {:error, :timeout}
+
+      {:error, reason} ->
+        Logger.bare_log(
+          :error,
+          "Failed to download #{inspect(url)}. Error #{inspect(reason)}"
+        )
+
+        {:error, reason}
     end
   end
 
@@ -575,22 +544,22 @@ defmodule TzWorld.Downloader do
   defp dynamic_certificate_locations do
     [
       # Configured cacertfile
-      Application.get_env(:ex_cldr, :cacertfile),
+      Application.get_env(:tz_world, :cacertfile),
 
       # Populated if hex package CAStore is configured
       if(Code.ensure_loaded?(CAStore), do: apply(CAStore, :file_path, [])),
 
-      # Populated if hex package certfi is configured
+      # Populated if hex package certifi is configured
       if(Code.ensure_loaded?(:certifi), do: apply(:certifi, :cacertfile, []) |> List.to_string())
     ]
     |> Enum.reject(&is_nil/1)
   end
 
+  @doc false
   def certificate_locations() do
     dynamic_certificate_locations() ++ @static_certificate_locations
   end
 
-  @doc false
   defp certificate_store do
     certificate_locations()
     |> Enum.find(&File.exists?/1)
@@ -604,9 +573,9 @@ defmodule TzWorld.Downloader do
     Tried looking for: #{inspect(certificate_locations())}
 
     A certificate trust store is required in
-    order to download locales for your configuration.
+    order to download the time zone data.
 
-    Since ex_cldr could not detect a system
+    Since tz_world could not detect a system
     installed certificate trust store one of the
     following actions may be taken:
 
@@ -614,14 +583,13 @@ defmodule TzWorld.Downloader do
        be automatically detected after recompilation.
 
     2. Install the hex package `certifi`. It will
-       be automatically detected after recomilation.
+       be automatically detected after recompilation.
 
     3. Specify the location of a certificate trust store
        by configuring it in `config.exs` or `runtime.exs`:
 
-       config :ex_cldr,
-         cacertfile: "/path/to/cacertfile",
-         ...
+       config :tz_world,
+         cacertfile: "/path/to/cacertfile"
 
     """
   end
@@ -631,15 +599,10 @@ defmodule TzWorld.Downloader do
   end
 
   defp http_opts(hostname, options) do
-    default_timeout =
-      "TZWORLD_HTTP_TIMEOUT"
-      |> System.get_env(@tzworld_default_timeout)
-      |> String.to_integer()
+    default_timeout = env_milliseconds("TZWORLD_HTTP_TIMEOUT", @tzworld_default_timeout)
 
     default_connection_timeout =
-      "TZWORLD_HTTP_CONNECTION_TIMEOUT"
-      |> System.get_env(@tzworld_default_connection_timeout)
-      |> String.to_integer()
+      env_milliseconds("TZWORLD_HTTP_CONNECTION_TIMEOUT", @tzworld_default_connection_timeout)
 
     verify_peer? = Keyword.get(options, :verify_peer, true)
     ssl_options = https_ssl_opts(hostname, verify_peer?)
@@ -647,6 +610,23 @@ defmodule TzWorld.Downloader do
     connection_timeout = Keyword.get(options, :connection_timeout, default_connection_timeout)
 
     [timeout: timeout, connect_timeout: connection_timeout, ssl: ssl_options]
+  end
+
+  # A variable that is set but is not a positive whole number of
+  # milliseconds falls back to the default rather than failing the download.
+  defp env_milliseconds(variable, default) do
+    case Integer.parse(System.get_env(variable, default)) do
+      {milliseconds, ""} when milliseconds > 0 ->
+        milliseconds
+
+      _other ->
+        Logger.bare_log(
+          :warning,
+          "#{variable} is not a number of milliseconds. Using #{default} instead."
+        )
+
+        String.to_integer(default)
+    end
   end
 
   defp user_agent do
@@ -721,15 +701,19 @@ defmodule TzWorld.Downloader do
     :ssl.eccs() -- (:ssl.eccs() -- preferred_eccs)
   end
 
-  defp secure_ssl? do
-    # System.get_env/2 always returns the default ("TRUE") when the var
-    # is unset, so the upcased value is always a binary — no `nil`
-    # branch is reachable.
-    case String.upcase(System.get_env(@tzworld_unsafe_https, "TRUE")) do
-      "FALSE" -> false
-      "NIL" -> false
-      _other -> true
-    end
+  # Certificates are verified unless TZWORLD_UNSAFE_HTTPS is set to something
+  # other than an empty string, "false" or "nil", in any case. Verification
+  # stays on for any value that says no, so a variable set to "false" cannot
+  # turn it off.
+  @doc false
+  def secure_ssl? do
+    value =
+      @tzworld_unsafe_https
+      |> System.get_env("")
+      |> String.trim()
+      |> String.downcase()
+
+    value in ["", "false", "nil"]
   end
 
   defp https_proxy(options) do
@@ -739,6 +723,7 @@ defmodule TzWorld.Downloader do
       System.get_env("https_proxy")
   end
 
+  @doc false
   def otp_version do
     :erlang.system_info(:otp_release) |> List.to_integer()
   end

@@ -4,7 +4,7 @@
 
 Version 2.5 compiles every shape for point-in-polygon testing as the data is loaded ([`TzWorld.PackedGeometry`](https://hexdocs.pm/tz_world/TzWorld.PackedGeometry.html)). Each ring's vertices are packed into a binary at 16 bytes a vertex instead of 72, and its edges are indexed by the horizontal bands they span, so a test examines only the edges in the query point's band — a few dozen, even in rings of nearly 200,000 vertices — rather than every vertex of the ring. Results are unchanged, including which zone `TzWorld.timezone_at/1` reports where zones overlap: 2.4 and 2.5 agree on every one of 5,134 test points.
 
-Measured on the without-oceans dataset with an 8-core, 16-thread Intel Xeon W-2140B:
+Measured on the without-oceans dataset with an 8-core, 16-thread Intel Xeon W-2140B running OTP 29.1 without the JIT. With the JIT, absolute times are likely to be shorter:
 
 | Measure                              | 2.4                                     | 2.5    |
 | ------------------------------------ | --------------------------------------- | ------ |
@@ -29,7 +29,7 @@ Version 2.0 introduced an R-tree spatial index ([`TzWorld.Backend.SpatialIndex`]
 | random uniform      | 1.42×           |
 | `small_or_thin`     | 1.08×           |
 
-Lookups also bypass the GenServer mailbox and read directly from `:persistent_term`, so they are lock-free under concurrent load and scale linearly with cores. Numbers above were collected with [`benchee/backend.exs`](https://github.com/kipcole9/tz_world/blob/v2.0.0/benchee/backend.exs) on the without-oceans dataset; reproduce locally with `mix run benchee/backend.exs`.
+Lookups also bypass the GenServer mailbox and read directly from `:persistent_term`, so they are lock-free under concurrent load and scale linearly with cores. Numbers above were collected with [`benchee/backend.exs`](https://github.com/kipcole9/tz_world/blob/v2.0.0/benchee/backend.exs) on the without-oceans dataset. To reproduce them locally, run `mix tz_world.update --backends dets` to build the cache the deprecated backends read, then `mix run benchee/backend.exs`.
 
 ## `mix tz_world.update` memory (vs. 1.x)
 

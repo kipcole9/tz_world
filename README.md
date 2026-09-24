@@ -11,7 +11,7 @@ project.
 
 > #### Upgrading from 1.x {: .warning}
 >
-> The on-disk data format changed in 2.x: `priv/timezones-geodata.tzw1` replaces `priv/timezones-geodata.etf.zip`. After upgrading you must run `mix tz_world.update` once to reinstall the data in the new format. Until you do, every lookup returns `{:error, :time_zone_not_found}`. The old `.etf.zip` and `.dets` files in `priv/` are no longer read and can be deleted to reclaim disk space (≈ 900 MB).
+> The on-disk data format changed in 2.x: `priv/timezones-geodata.tzw1` replaces `priv/timezones-geodata.etf.zip`. After upgrading you must run `mix tz_world.update` once to reinstall the data in the new format. Until you do, every lookup returns `{:error, :enoent}`. The old `.etf.zip` and `.dets` files in `priv/` are no longer read and can be deleted to reclaim disk space (≈ 900 MB).
 
 ## Installation
 
@@ -20,7 +20,7 @@ Add `tz_world` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tz_world, "~> 2.0"}
+    {:tz_world, "~> 2.5"}
   ]
 end
 ```
@@ -29,7 +29,7 @@ After adding `TzWorld` as a dependency, run `mix deps.get` to install it. Then r
 
 **NOTE** No data is installed with the package and until the data is installed
 with `mix tz_world.update` all calls to `TzWorld.timezone_at/1` will return
-`{:error, :time_zone_not_found}`.
+`{:error, :enoent}`.
 
 ### Configuration
 
@@ -46,11 +46,13 @@ config :tz_world,
   # libraries `CAStore` or `certifi` or the platform
   # trust store.
   cacertfile: "path/to/ca_trust_store",
-  # The default is no options, however one can set any `httpc` client options.
-  httpc_opts: [
-    proxy: {{String.to_charlist(proxy_host), proxy_port}, []}
-  ]
-```    
+  # The default is the HTTPS_PROXY or https_proxy
+  # environment variable, if either is set.
+  https_proxy: "https://proxy.example.com:8080"
+```
+
+Download timeouts can also be set with environment variables; see `TzWorld.Downloader`.
+
 ## Backend selection
 
 `TzWorld` provides alternative strategies for managing access to the backend data. Each backend is implemented as a `GenServer` that needs to be either manually started with `BackendModule.start_link/1` or preferably added to your application's supervision tree.
@@ -118,7 +120,7 @@ config :tz_world,
 Installing `tz_world` from source or from hex does not include the timezones
 Geo JSON data. The data is required and to install or update it run:
 
-```elixir
+```bash
 mix tz_world.update
 ```
 
@@ -142,7 +144,7 @@ A running application can also be instructed to reload the data by executing `Tz
 
 ## Usage
 
-The primary API is `TzWorld.timezone_at`. It takes either a `Geo.Point` struct or a `longitude` and `latitude` in degrees. Note the parameter order: `longitude`, `latitude`. It also takes and optional second parameter, `backend`, which must be one of the configured and running backend modules.  By default `timezone_at/2` will detect a running backend and will raise an exception if no running backend is found.
+The primary API is `TzWorld.timezone_at`. It takes either a `Geo.Point` struct or a `longitude` and `latitude` in degrees. Note the parameter order: `longitude`, `latitude`. It also takes an optional second parameter, `backend`, which must be one of the configured and running backend modules. By default `timezone_at/2` will detect a running backend and will raise an exception if no running backend is found. A point that is not one of these forms, or is out of range, returns `{:error, :invalid_point}`.
 
 ```elixir
 iex> TzWorld.timezone_at(%Geo.Point{coordinates: {3.2, 45.32}})
@@ -158,6 +160,9 @@ iex> TzWorld.timezone_at(%Geo.PointZ{coordinates: {-74.006, 40.7128, 0.0}})
 # data for the oceans (the default)
 iex> TzWorld.timezone_at(%Geo.Point{coordinates: {1.3, 65.62}})
 {:error, :time_zone_not_found}
+
+iex> TzWorld.timezone_at({200.0, 45.32})
+{:error, :invalid_point}
 ```
 
 ## Performance

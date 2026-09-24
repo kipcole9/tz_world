@@ -10,6 +10,20 @@ This is the changelog for Tz_World v2.5.0 released on September 24th, 2026.
 
 * `TzWorld.reload_timezone_data/0` now waits up to two minutes for the `SpatialIndex` backend to rebuild rather than thirty seconds, so a reload on a slow machine no longer times out.
 
+### Bug Fixes
+
+* `TzWorld.timezone_at/2` and `TzWorld.all_timezones_at/2` return `{:error, :invalid_point}` for a malformed or out-of-range point instead of raising. An out-of-range `Geo.Point`, which previously found no time zone, returns the same error.
+
+* Setting `TZWORLD_UNSAFE_HTTPS` to `false` or `nil` no longer turns off certificate verification for downloads. Verification is now turned off only when it is set to another value, such as `true`.
+
+* The `:cacertfile` configured for `:tz_world` is now used to verify downloads. It was being read from the `:ex_cldr` configuration instead.
+
+* `TzWorld.Downloader.current_release/0` reads the installed data file rather than raising when no backend is running. An invalid `TZWORLD_HTTP_TIMEOUT` or `TZWORLD_HTTP_CONNECTION_TIMEOUT` falls back to the default rather than raising.
+
+* The README documented an `:httpc_opts` option that was never read. It now documents `:https_proxy`, which is.
+
+* The `TzWorld.Backend` behaviour now declares `version/0`, which `TzWorld.version/0` has always called. A custom backend without it now gets a compile-time warning rather than failing at run time.
+
 ## Tz_World v2.4.0
 
 This is the changelog for Tz_World v2.4.0 released on September 22nd, 2026.

@@ -1,12 +1,40 @@
 defmodule TzWorld do
   @moduledoc """
-  Resolve a timezone name from coordinates.
+  Resolves the time zone at a location from its coordinates.
+
+  Time zone boundaries come from the
+  [timezone-boundary-builder](https://github.com/evansiroky/timezone-boundary-builder)
+  project. They are not included in the package: `mix tz_world.update`
+  downloads and installs them, and lookups return `{:error, :enoent}`
+  until it has run.
+
+  Lookups are answered by a backend running in the application's
+  supervision tree, normally `TzWorld.Backend.SpatialIndex`.
+
+  ### Public API
+
+  * `timezone_at/2` returns the time zone at a point.
+
+  * `all_timezones_at/2` returns every time zone at a point, for the few
+    places where zones overlap.
+
+  * `version/0` returns the version of the installed data.
+
+  * `reload_timezone_data/0` reloads the running backends after the data
+    is updated.
 
   """
   alias Geo.{Point, PointZ}
   import TzWorld.Guards
 
+  @typedoc "A backend module implementing `TzWorld.Backend`."
   @type backend :: module()
+
+  @typedoc """
+  A location as a `Geo.Point`, a `Geo.PointZ` or a `{longitude, latitude}`
+  tuple, in degrees.
+  """
+  @type point :: Geo.Point.t() | Geo.PointZ.t() | {lng :: number(), lat :: number()}
 
   # Reload order matters: `EtsWithIndexCache.load_geodata/0` reads from
   # the DETS file owned by `DetsWithIndexCache`, so DETS must be rebuilt
@@ -19,21 +47,40 @@ defmodule TzWorld do
   ]
 
   @doc """
-  Returns the OTP app name of :tz_world
+  Returns the OTP application name of `tz_world`.
+
+  ### Returns
+
+  * `:tz_world`.
+
+  ### Examples
+
+      iex> TzWorld.app_name()
+      :tz_world
 
   """
+  @spec app_name :: :tz_world
   def app_name do
     :tz_world
   end
 
   @doc """
-  Returns the installed version of time
-  zone data
+  Returns the version of the installed time zone data.
 
-  ## Example
+  The version is read from the running backend.
 
-      TzWorld.version
-      => {:ok, "2020d"}
+  ### Returns
+
+  * `{:ok, version}` where `version` is the name of the upstream data
+    release, such as `"2026d"`.
+
+  * `{:error, :enoent}` if the time zone data has not been installed.
+
+  ### Examples
+
+      iex> {:ok, version} = TzWorld.version()
+      iex> is_binary(version)
+      true
 
   """
   @spec version :: {:ok, String.t()} | {:error, :enoent}
@@ -89,11 +136,12 @@ defmodule TzWorld do
     wraps each per-backend reload. Metadata includes `:backend`
     (the module). `:stop` metadata also includes `:result`.
 
-  ### Example
+  ### Examples
 
-      # An app running only the default backend
-      TzWorld.reload_timezone_data()
-      #=> {:ok, [{TzWorld.Backend.SpatialIndex, {:ok, :loaded}}]}
+  In an application running only the default backend:
+
+      iex> TzWorld.reload_timezone_data()
+      {:ok, [{TzWorld.Backend.SpatialIndex, {:ok, :loaded}}]}
 
   """
   @type backend_result :: {:ok, term()} | {:error, term()}
@@ -132,29 +180,33 @@ defmodule TzWorld do
   end
 
   @doc """
-  Returns the *first* timezone name found for the given
-  coordinates specified as either a `Geo.Point`,
-  a `Geo.PointZ` or a tuple `{lng, lat}`
+  Returns the time zone at a point.
 
-  ## Arguments
+  Where time zones overlap, which happens in a few disputed territories,
+  the first one found is returned. `all_timezones_at/2` returns them all.
 
-  * `point` is a `Geo.Point.t()` a `Geo.PointZ.t()` or
-    a tuple `{lng, lat}`
+  ### Arguments
 
-  * `backend` is any backend access module.
+  * `point` is a `Geo.Point`, a `Geo.PointZ` or a `{longitude, latitude}`
+    tuple, in degrees. Longitude always comes first.
 
-  ## Returns
+  * `backend` is the backend module to query. The default is the running
+    backend, preferring the configured `:default_backend`. A `RuntimeError`
+    is raised if no backend is running.
 
-  * `{:ok, timezone}` or
+  ### Returns
 
-  * `{:error, :time_zone_not_found}`
+  * `{:ok, time_zone}` where `time_zone` is the name of the time zone.
 
-  ## Notes
+  * `{:error, :time_zone_not_found}` if no time zone contains the point.
 
-  Note that the point is always expressed as
-  `lng` followed by `lat`.
+  * `{:error, :invalid_point}` if `point` is not one of the forms above, or
+    its longitude is outside -180..180 or its latitude outside -90..90.
 
-  ## Examples
+  * `{:error, :enoent}` if the time zone data has not been installed. Run
+    `mix tz_world.update` to install it.
+
+  ### Examples
 
       iex> TzWorld.timezone_at(%Geo.Point{coordinates: {3.2, 45.32}})
       {:ok, "Europe/Paris"}
@@ -165,115 +217,77 @@ defmodule TzWorld do
       iex> TzWorld.timezone_at({0.0, 0.0})
       {:error, :time_zone_not_found}
 
-
-  The algorithm starts by filtering out timezones whose bounding
-  box does not contain the given point.
-
-  Once filtered, the *first* timezone which contains the given
-  point is returned, or an error tuple if none of the
-  timezones match.
-
-  In rare cases, typically due to territorial disputes,
-  one or more timezones may apply to a given location.
-  This function returns the first time zone that matches.
+      iex> TzWorld.timezone_at({200.0, 45.32})
+      {:error, :invalid_point}
 
   """
-  @spec timezone_at(Geo.Point.t(), backend) ::
-          {:ok, String.t()} | {:error, atom}
-
-  def timezone_at(point, backend \\ fetch_backend())
-
-  def timezone_at(%Point{} = point, backend) when is_atom(backend) do
-    backend.timezone_at(point)
-  end
-
-  @spec timezone_at(Geo.PointZ.t(), backend) ::
-          {:ok, String.t()} | {:error, atom}
-
-  def timezone_at(%PointZ{coordinates: {lng, lat, _alt}}, backend) when is_atom(backend) do
-    point = %Point{coordinates: {lng, lat}}
-    backend.timezone_at(point)
-  end
-
-  @spec timezone_at({lng :: number, lat :: number}, backend) ::
-          {:ok, String.t()} | {:error, atom}
-
-  def timezone_at({lng, lat}, backend) when is_lng(lng) and is_lat(lat) do
-    point = %Geo.Point{coordinates: {lng, lat}}
-    backend.timezone_at(point)
+  @spec timezone_at(point(), backend()) :: {:ok, String.t()} | {:error, atom()}
+  def timezone_at(point, backend \\ fetch_backend()) when is_atom(backend) do
+    case validate_point(point) do
+      {:ok, point} -> backend.timezone_at(point)
+      :error -> {:error, :invalid_point}
+    end
   end
 
   @doc """
-  Returns all timezone name found for the given
-  coordinates specified as either a `Geo.Point`,
-  a `Geo.PointZ` or a tuple `{lng, lat}`
+  Returns every time zone at a point.
 
-  ## Arguments
+  Most points are in exactly one time zone. A few, in disputed
+  territories, are in more than one, and points outside every time zone
+  are in none.
 
-  * `point` is a `Geo.Point.t()` a `Geo.PointZ.t()` or
-    a tuple `{lng, lat}`
+  ### Arguments
 
-  * `backend` is any backend access module.
+  * `point` is a `Geo.Point`, a `Geo.PointZ` or a `{longitude, latitude}`
+    tuple, in degrees. Longitude always comes first.
 
-  ## Returns
+  * `backend` is the backend module to query. The default is the running
+    backend, preferring the configured `:default_backend`. A `RuntimeError`
+    is raised if no backend is running.
 
-  * `{:ok, timezone}` or
+  ### Returns
 
-  * `{:error, :time_zone_not_found}`
+  * `{:ok, time_zones}` where `time_zones` is a list of time zone names in
+    the order they were found, empty if no time zone contains the point.
 
-  ## Notes
+  * `{:error, :invalid_point}` if `point` is not one of the forms above, or
+    its longitude is outside -180..180 or its latitude outside -90..90.
 
-  Note that the point is always expressed as
-  `lng` followed by `lat`.
+  * `{:error, :enoent}` if the time zone data has not been installed. Run
+    `mix tz_world.update` to install it.
 
-  ## Examples
-
-      iex> TzWorld.all_timezones_at(%Geo.Point{coordinates: {3.2, 45.32}})
-      {:ok, ["Europe/Paris"]}
+  ### Examples
 
       iex> TzWorld.all_timezones_at({3.2, 45.32})
       {:ok, ["Europe/Paris"]}
 
+      iex> TzWorld.all_timezones_at({87.6168, 43.8256})
+      {:ok, ["Asia/Shanghai", "Asia/Urumqi"]}
+
       iex> TzWorld.all_timezones_at({0.0, 0.0})
       {:ok, []}
 
-
-  The algorithm starts by filtering out timezones whose bounding
-  box does not contain the given point.
-
-  Once filtered, all timezones which contains the given
-  point is returned, or an error tuple if none of the
-  timezones match.
-
-  In rare cases, typically due to territorial disputes,
-  one or more timezones may apply to a given location.
-  This function returns all time zones that match.
-
   """
-  @spec all_timezones_at(Geo.Point.t(), backend) ::
-          {:ok, [String.t()]}
-
-  def all_timezones_at(point, backend \\ fetch_backend())
-
-  def all_timezones_at(%Point{} = point, backend) when is_atom(backend) do
-    backend.all_timezones_at(point)
+  @spec all_timezones_at(point(), backend()) :: {:ok, [String.t()]} | {:error, atom()}
+  def all_timezones_at(point, backend \\ fetch_backend()) when is_atom(backend) do
+    case validate_point(point) do
+      {:ok, point} -> backend.all_timezones_at(point)
+      :error -> {:error, :invalid_point}
+    end
   end
 
-  @spec all_timezones_at(Geo.PointZ.t(), backend) ::
-          {:ok, [String.t()]}
+  # Whatever the caller passes, only a well-formed point in range reaches a
+  # backend, so backends can rely on numeric coordinates.
+  defp validate_point(%Point{coordinates: {lng, lat}} = point) when is_lng(lng) and is_lat(lat),
+    do: {:ok, point}
 
-  def all_timezones_at(%PointZ{coordinates: {lng, lat, _alt}}, backend) when is_atom(backend) do
-    point = %Point{coordinates: {lng, lat}}
-    backend.all_timezones_at(point)
-  end
+  defp validate_point(%PointZ{coordinates: {lng, lat, _alt}}) when is_lng(lng) and is_lat(lat),
+    do: {:ok, %Point{coordinates: {lng, lat}}}
 
-  @spec all_timezones_at({lng :: number, lat :: number}, backend) ::
-          {:ok, [String.t()]}
+  defp validate_point({lng, lat}) when is_lng(lng) and is_lat(lat),
+    do: {:ok, %Point{coordinates: {lng, lat}}}
 
-  def all_timezones_at({lng, lat}, backend) when is_lng(lng) and is_lat(lat) do
-    point = %Geo.Point{coordinates: {lng, lat}}
-    backend.all_timezones_at(point)
-  end
+  defp validate_point(_point), do: :error
 
   @doc false
   def contains?(%Geo.MultiPolygon{} = multi_polygon, %Geo.Point{} = point) do
@@ -326,6 +340,7 @@ defmodule TzWorld do
     TzWorld.Backend.DetsWithIndexCache
   ]
 
+  @doc false
   def fetch_backend do
     backends =
       [Application.get_env(:tz_world, :default_backend) | @default_backend_precedence]

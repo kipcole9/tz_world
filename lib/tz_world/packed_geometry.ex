@@ -76,8 +76,20 @@ defmodule TzWorld.PackedGeometry do
 
   * `{tzid, polygons}`, with the polygons in the same order as the shape's.
 
+  ### Examples
+
+      iex> square = %Geo.Polygon{
+      ...>   coordinates: [[{0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {0.0, 4.0}, {0.0, 0.0}]],
+      ...>   properties: %{tzid: "Etc/Square"}
+      ...> }
+      iex> {tzid, [{_outer, holes}]} = TzWorld.PackedGeometry.compile(square)
+      iex> {tzid, holes}
+      {"Etc/Square", []}
+
   """
   @spec compile(Geo.MultiPolygon.t() | Geo.Polygon.t()) :: {String.t(), [polygon()]}
+  def compile(shape)
+
   def compile(%Geo.MultiPolygon{coordinates: polygons, properties: %{tzid: tzid}}),
     do: {tzid, Enum.map(polygons, &compile_polygon/1)}
 
@@ -101,8 +113,25 @@ defmodule TzWorld.PackedGeometry do
 
   * `true` or `false`.
 
+  ### Examples
+
+      iex> square_with_hole = %Geo.Polygon{
+      ...>   coordinates: [
+      ...>     [{0.0, 0.0}, {4.0, 0.0}, {4.0, 4.0}, {0.0, 4.0}, {0.0, 0.0}],
+      ...>     [{1.0, 1.0}, {2.0, 1.0}, {2.0, 2.0}, {1.0, 2.0}, {1.0, 1.0}]
+      ...>   ],
+      ...>   properties: %{tzid: "Etc/Square"}
+      ...> }
+      iex> {_tzid, polygons} = TzWorld.PackedGeometry.compile(square_with_hole)
+      iex> TzWorld.PackedGeometry.contains?(polygons, 3.0, 3.0)
+      true
+      iex> TzWorld.PackedGeometry.contains?(polygons, 1.5, 1.5)
+      false
+
   """
   @spec contains?([polygon()], number(), number()) :: boolean()
+  def contains?(polygons, x, y)
+
   def contains?([], _x, _y), do: false
 
   def contains?([{outer, holes} | rest], x, y) do

@@ -85,24 +85,44 @@ defmodule TzWorld.Backend.SpatialIndex do
   @index_key {__MODULE__, :index}
 
   @doc """
-  Start the backend and bulk-load the spatial index.
+  Starts the backend and loads the time zone data.
 
   The load is performed synchronously inside `init/1`, so once
   `start_link/1` returns the index is in `:persistent_term` and
-  lookups are immediately ready to serve.
+  lookups are immediately ready to serve. The backend is registered
+  under its module name.
 
   ### Arguments
 
-  * `options` is a keyword list passed through to
-    `GenServer.start_link/3`. There are no backend-specific options.
+  * `options` is a keyword list of options.
+
+  ### Options
+
+  * There are none. `options` is accepted so the module can be used
+    as a child specification, and is otherwise ignored.
 
   ### Returns
 
-  * `{:ok, pid}` if the backend started and finished loading.
+  * `{:ok, pid}` once the data is loaded. If the data has not been
+    installed the backend still starts and logs a warning, and lookups
+    return `{:error, :enoent}` until the data is installed with
+    `mix tz_world.update` and loaded with
+    `TzWorld.reload_timezone_data/0`.
 
-  * `{:error, reason}` if the compressed timezone data could not be
-    found or decoded — typically because `mix tz_world.update` has not
-    yet been run.
+  * `{:error, {:already_started, pid}}` if the backend is already
+    running.
+
+  * `{:error, reason}` if the installed data could not be decoded.
+
+  ### Examples
+
+  Add the backend to an application's supervision tree:
+
+      children = [
+        TzWorld.Backend.SpatialIndex
+      ]
+
+      Supervisor.start_link(children, strategy: :one_for_one)
 
   """
   def start_link(options \\ []) do
