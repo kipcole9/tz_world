@@ -124,7 +124,8 @@ defmodule TzWorld.Mixfile do
           Mix.Tasks.TzWorld.Update
         ],
         Internals: [
-          TzWorld.Downloader
+          TzWorld.Downloader,
+          TzWorld.PackedGeometry
         ]
       ],
       skip_undefined_reference_warnings_on: ["CHANGELOG.md", "README.md"]

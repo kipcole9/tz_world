@@ -9,38 +9,45 @@ defmodule TzWorld.Backend.SpatialIndex do
 
   ## How it works
 
-  At startup the backend reads the compressed timezone shape data
-  shipped in `priv/`, builds a Sort-Tile-Recursive packed R-tree over
-  every shape's bounding box (one entry per sub-polygon for
-  `Geo.MultiPolygon` shapes), and stores three terms in
-  `:persistent_term`:
+  At startup the backend reads the compressed timezone shape data that
+  `mix tz_world.update` installs and builds two structures:
 
-  * the R-tree itself,
+  * a Sort-Tile-Recursive packed R-tree over every shape's bounding
+    box, with one entry per sub-polygon of a `Geo.MultiPolygon`;
 
-  * a tuple of every shape geometry indexed by leaf id,
+  * each shape compiled by `TzWorld.PackedGeometry`: its rings packed
+    into binaries, with their edges indexed by horizontal band.
 
-  * the data version string.
+  Both are stored with the data version as a single term under one
+  `:persistent_term` key. A lookup finds candidate shapes in the
+  R-tree, then tests each against only the ring edges in the query
+  point's band — typically a few dozen, even in rings with nearly
+  200,000 vertices — so it takes microseconds.
 
   Lookups (`TzWorld.timezone_at/1` and `TzWorld.all_timezones_at/1`)
-  read these terms directly. They do not go through the GenServer
+  read the stored term directly. They do not go through the GenServer
   mailbox and do not copy any term, which makes them lock-free and
   safe to call from any number of processes concurrently.
 
   ## Reload
 
-  `reload_timezone_data/0` rebuilds the index and rewrites all three
-  persistent terms. Each `:persistent_term.put/2` triggers a global
-  garbage collection for every process that references any persistent
-  term — this is fine when reload is invoked manually after a data
-  update but would be costly on the hot path. Reload should not be
-  called on every request.
+  `reload_timezone_data/0` rebuilds the index and replaces the stored
+  term in one `:persistent_term.put/2`. Lookups carry on against the
+  previous index until then, so a reload never blocks them. Loading
+  and reloading compile the shapes in parallel, one task per shape, and
+  take a couple of seconds on a multi-core machine and several on a
+  single core. The put also triggers a global garbage collection for
+  every process that references a persistent term — fine when reload
+  is invoked after a data update, costly on a hot path. Reload should
+  not be called on every request.
 
   ## Memory profile
 
-  The full shape data is held in memory (typically several hundred
-  megabytes depending on whether ocean coverage is included). For
-  memory-constrained environments, consider
-  `TzWorld.Backend.DetsWithIndexCache`.
+  About 150 MB for the data without ocean coverage, the default. Ring
+  vertices are held as packed binaries at 16 bytes a vertex, and those
+  binaries live off-heap: `:persistent_term.info/0` reports only the
+  small term that refers to them, so measure `:erlang.memory/1`
+  instead.
 
   ## Public API
 
@@ -60,10 +67,14 @@ defmodule TzWorld.Backend.SpatialIndex do
   use GenServer
   require Logger
 
-  alias TzWorld.{GeoData, SpatialIndex}
+  alias TzWorld.{GeoData, PackedGeometry, SpatialIndex}
   alias Geo.Point
 
-  @timeout 10_000
+  # A reload rebuilds the packed geometry for every shape: a couple of seconds
+  # on a multi-core machine, several on a single core and more on a slow one.
+  # Lookups keep reading the previous index until the rebuilt one is swapped
+  # in, so a generous wait costs nothing but the caller's patience.
+  @reload_timeout 120_000
 
   # All loaded state lives under a single `:persistent_term` key so the
   # reload swap is atomic: lookups always observe a consistent
@@ -77,7 +88,7 @@ defmodule TzWorld.Backend.SpatialIndex do
   Start the backend and bulk-load the spatial index.
 
   The load is performed synchronously inside `init/1`, so once
-  `start_link/1` returns the persistent terms are populated and
+  `start_link/1` returns the index is in `:persistent_term` and
   lookups are immediately ready to serve.
 
   ### Arguments
@@ -141,26 +152,24 @@ defmodule TzWorld.Backend.SpatialIndex do
   @doc false
   @spec timezone_at(Geo.Point.t()) :: {:ok, String.t()} | {:error, atom}
   def timezone_at(%Point{coordinates: {lng, lat}}) do
-    with {:ok, tree, shapes} <- fetch_index() do
+    with {:ok, tree, zones} <- fetch_index() do
       tree
       |> SpatialIndex.stab(lng, lat)
-      |> dedupe_walk(shapes, %Point{coordinates: {lng, lat}})
+      |> dedupe_walk(zones, lng, lat)
     end
   end
 
   @doc false
   @spec all_timezones_at(Geo.Point.t()) :: {:ok, [String.t()]} | {:error, atom}
   def all_timezones_at(%Point{coordinates: {lng, lat}}) do
-    with {:ok, tree, shapes} <- fetch_index() do
-      point = %Point{coordinates: {lng, lat}}
-
+    with {:ok, tree, zones} <- fetch_index() do
       tzids =
         tree
         |> SpatialIndex.stab(lng, lat)
         |> Enum.uniq()
         |> Enum.reduce([], fn id, acc ->
-          shape = :erlang.element(id + 1, shapes)
-          if TzWorld.contains?(shape, point), do: [shape.properties.tzid | acc], else: acc
+          {tzid, polygons} = :erlang.element(id + 1, zones)
+          if PackedGeometry.contains?(polygons, lng, lat), do: [tzid | acc], else: acc
         end)
         |> Enum.reverse()
 
@@ -171,7 +180,7 @@ defmodule TzWorld.Backend.SpatialIndex do
   @doc false
   @spec reload_timezone_data :: {:ok, term} | {:error, term}
   def reload_timezone_data do
-    GenServer.call(__MODULE__, :reload_data, @timeout * 3)
+    GenServer.call(__MODULE__, :reload_data, @reload_timeout)
   end
 
   # --- Server callbacks
@@ -191,28 +200,28 @@ defmodule TzWorld.Backend.SpatialIndex do
       nil ->
         {:error, :enoent}
 
-      {_version, shapes, tree} ->
-        {:ok, tree, shapes}
+      {_version, zones, tree} ->
+        {:ok, tree, zones}
     end
   end
 
   # Walk candidate ids, skipping duplicates without an upfront uniq pass.
   # Candidate sets are typically small (1–10), so an inline-seen list is
   # faster than building a MapSet.
-  defp dedupe_walk(ids, shapes, point), do: dedupe_walk(ids, shapes, point, [])
+  defp dedupe_walk(ids, zones, lng, lat), do: dedupe_walk(ids, zones, lng, lat, [])
 
-  defp dedupe_walk([], _shapes, _point, _seen), do: {:error, :time_zone_not_found}
+  defp dedupe_walk([], _zones, _lng, _lat, _seen), do: {:error, :time_zone_not_found}
 
-  defp dedupe_walk([id | rest], shapes, point, seen) do
+  defp dedupe_walk([id | rest], zones, lng, lat, seen) do
     if id in seen do
-      dedupe_walk(rest, shapes, point, seen)
+      dedupe_walk(rest, zones, lng, lat, seen)
     else
-      shape = :erlang.element(id + 1, shapes)
+      {tzid, polygons} = :erlang.element(id + 1, zones)
 
-      if TzWorld.contains?(shape, point) do
-        {:ok, shape.properties.tzid}
+      if PackedGeometry.contains?(polygons, lng, lat) do
+        {:ok, tzid}
       else
-        dedupe_walk(rest, shapes, point, [id | seen])
+        dedupe_walk(rest, zones, lng, lat, [id | seen])
       end
     end
   end
@@ -220,23 +229,33 @@ defmodule TzWorld.Backend.SpatialIndex do
   # --- Loader
 
   defp load_into_persistent_term do
-    with {:ok, version, shapes_stream} <- GeoData.stream_shapes() do
-      shapes = Enum.to_list(shapes_stream)
-      shapes_tuple = List.to_tuple(shapes)
+    with {:ok, version, records} <- GeoData.stream_shape_records() do
+      # Shapes are decoded and compiled in parallel, and each task drops its
+      # Geo struct once compiled, so the lists-of-tuples geometry is never held
+      # all at once. Results are collected in file order, the order the R-tree
+      # entries have always been built in: it decides the order candidates are
+      # returned in, and so which zone `timezone_at/1` reports where zones
+      # overlap.
+      {zones, entries} =
+        records
+        |> Stream.with_index()
+        |> Task.async_stream(&compile_record/1, ordered: true, timeout: :infinity)
+        |> Enum.map(fn {:ok, compiled} -> compiled end)
+        |> Enum.unzip()
 
-      entries =
-        shapes
-        |> Enum.with_index()
-        |> Enum.flat_map(fn {shape, index} -> shape_to_entries(shape, index) end)
-
-      tree = SpatialIndex.build(entries)
+      tree = SpatialIndex.build(Enum.concat(entries))
 
       # Single atomic put: lookups either see the entire previous index
       # or the entire new one, never a half-replaced state.
-      :persistent_term.put(@index_key, {version, shapes_tuple, tree})
+      :persistent_term.put(@index_key, {version, List.to_tuple(zones), tree})
 
       :ok
     end
+  end
+
+  defp compile_record({record, index}) do
+    shape = :erlang.binary_to_term(record)
+    {PackedGeometry.compile(shape), shape_to_entries(shape, index)}
   end
 
   defp shape_to_entries(%{properties: %{bounding_box: %Geo.Polygon{} = bbox}}, index) do

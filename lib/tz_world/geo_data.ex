@@ -128,6 +128,21 @@ defmodule TzWorld.GeoData do
   fully consumed or halted.
   """
   def stream_shapes do
+    with {:ok, version, records} <- stream_shape_records() do
+      {:ok, version, Stream.map(records, &:erlang.binary_to_term/1)}
+    end
+  end
+
+  @doc """
+  Stream the shape records stored in the on-disk TZW1 file without
+  decoding them.
+
+  Returns `{:ok, version, stream}` where `stream` yields each shape
+  in external term format, in file order, so a caller can decode
+  shapes in parallel. The underlying file handle is closed when the
+  stream is fully consumed or halted.
+  """
+  def stream_shape_records do
     path = compressed_data_path()
 
     case File.open(path, [:read, :binary, :compressed]) do
@@ -137,7 +152,7 @@ defmodule TzWorld.GeoData do
             stream =
               Stream.resource(
                 fn -> handle end,
-                &read_next_shape/1,
+                &read_next_record/1,
                 &File.close/1
               )
 
@@ -254,7 +269,7 @@ defmodule TzWorld.GeoData do
     end
   end
 
-  defp read_next_shape(handle) do
+  defp read_next_record(handle) do
     case IO.binread(handle, 4) do
       :eof ->
         {:halt, handle}
@@ -263,7 +278,7 @@ defmodule TzWorld.GeoData do
         bin = IO.binread(handle, size)
 
         if is_binary(bin) and byte_size(bin) == size do
-          {[:erlang.binary_to_term(bin)], handle}
+          {[bin], handle}
         else
           raise RuntimeError, "Truncated shape record (expected #{size} bytes)"
         end

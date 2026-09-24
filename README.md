@@ -80,8 +80,9 @@ The following backends are available:
 
 * `TzWorld.Backend.SpatialIndex` (recommended, default) resolves a point by
   querying an R-tree spatial index built once at startup and held in
-  `:persistent_term`. Lookups read directly from `:persistent_term` and bypass
-  the GenServer mailbox entirely. This is the fastest backend on every
+  `:persistent_term`, then testing only the shape edges near the point, so a
+  lookup takes microseconds. Lookups read directly from `:persistent_term` and
+  bypass the GenServer mailbox entirely. This is the fastest backend on every
   benchmarked workload — and dramatically faster (≈18×) than any other
   backend on no-match queries (e.g. ocean points), where the previous
   bounding-box-scan algorithms had to walk every shape.
@@ -161,4 +162,4 @@ iex> TzWorld.timezone_at(%Geo.Point{coordinates: {1.3, 65.62}})
 
 ## Performance
 
-Version 2.0 lookups are 1.4×–18× faster than 1.x (R-tree spatial index), and `mix tz_world.update` peak memory is ≈ 13× lower (end-to-end streaming pipeline). See the [Performance guide](https://hexdocs.pm/tz_world/performance.html) for measurements and methodology.
+Version 2.5 lookups take about 10 µs, some 1,500× faster than 2.4, and the loaded data takes 152 MB rather than 530 MB, with identical results. Version 2.0 lookups were 1.4×–18× faster than 1.x (R-tree spatial index), and `mix tz_world.update` peak memory is ≈ 13× lower (end-to-end streaming pipeline). See the [Performance guide](https://hexdocs.pm/tz_world/performance.html) for measurements and methodology.

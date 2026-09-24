@@ -1,5 +1,15 @@
 ## Changelog for Tz_World
 
+## Tz_World v2.5.0
+
+This is the changelog for Tz_World v2.5.0 released on September 24th, 2026.
+
+### Enhancements
+
+* `TzWorld.Backend.SpatialIndex` lookups are about 1,500 times faster and the loaded data takes 152 MB rather than 530 MB, with identical results. Shapes are compiled into packed rings with banded edge indexes, in parallel, and loading at startup is about five times faster on an 8-core machine.
+
+* `TzWorld.reload_timezone_data/0` now waits up to two minutes for the `SpatialIndex` backend to rebuild rather than thirty seconds, so a reload on a slow machine no longer times out.
+
 ## Tz_World v2.4.0
 
 This is the changelog for Tz_World v2.4.0 released on September 22nd, 2026.

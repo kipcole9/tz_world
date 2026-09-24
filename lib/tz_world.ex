@@ -289,26 +289,35 @@ defmodule TzWorld do
     Enum.any?(bounding_boxes, &contains?(&1, point))
   end
 
-  defp interior?(ring, {px, py}) do
-    ring = for {x, y} <- ring, do: {x - px, y - py}
-    crosses = count_crossing(ring)
-    rem(crosses, 2) == 1
+  # Even-odd ray casting: a ray from the point towards +x crosses the ring an odd
+  # number of times exactly when the point is inside. Each vertex is translated
+  # relative to the point as it is read, in one tail-recursive pass, rather than
+  # building a translated copy of the whole ring first and then recursing over
+  # it one stack frame per vertex. The crossing test itself is unchanged.
+  defp interior?([], _point), do: false
+
+  defp interior?([{x, y} | rest], {px, py}) do
+    rem(count_crossings(rest, x - px, y - py, px, py, 0), 2) == 1
   end
 
   defp disjoint?(rings, point) do
     Enum.all?(rings, fn ring -> !interior?(ring, point) end)
   end
 
-  defp count_crossing([_]), do: 0
+  defp count_crossings([], _ax, _ay, _px, _py, crossings), do: crossings
 
-  defp count_crossing([{ax, ay}, {bx, by} | rest]) do
-    crosses = count_crossing([{bx, by} | rest])
+  defp count_crossings([{x, y} | rest], ax, ay, px, py, crossings) do
+    bx = x - px
+    by = y - py
 
-    if ay > 0 != by > 0 && (ax * by - bx * ay) / (by - ay) > 0 do
-      crosses + 1
-    else
-      crosses
-    end
+    crossings =
+      if ay > 0 != by > 0 && (ax * by - bx * ay) / (by - ay) > 0 do
+        crossings + 1
+      else
+        crossings
+      end
+
+    count_crossings(rest, bx, by, px, py, crossings)
   end
 
   @default_backend_precedence [

@@ -12,3 +12,9 @@ live under `plans/`.
   backend-precedence list in `lib/tz_world.ex`, the backend list in `README.md`,
   and the rebuild note in `guides/performance.md`, plus the backend comparison
   in `benchee/backend.exs`. The test suite is already free of them.
+
+## Done
+
+* [x] **Faster, smaller time zone lookups** — packed, band-indexed rings compiled in
+  parallel at load: ~10 µs lookups in 152 MB, results unchanged. Plan in
+  [plans/lookup-performance.md](plans/lookup-performance.md). 2026-09-24, v2.5.0.

@@ -1,14 +1,14 @@
 defmodule TzWorld.TimezoneFixtures do
-  @moduledoc """
-  Coordinate fixtures used by the test suite and the benchmark.
+  @moduledoc false
 
-  Grouped into categories that exercise different parts of the spatial
-  index: dense regions where many bounding boxes overlap; sparse / very
-  large zones; small or thin zones; ocean points (no match); and points
-  close to a polygon boundary.
-
-  Each entry is `{lng, lat, expected_tzid_or_nil, label}`.
-  """
+  # Coordinate fixtures used by the test suite and the benchmark.
+  #
+  # Grouped into categories that exercise different parts of the spatial
+  # index: dense regions where many bounding boxes overlap; sparse / very
+  # large zones; small or thin zones; ocean points (no match); and points
+  # close to a polygon boundary.
+  #
+  # Each entry is `{lng, lat, expected_tzid_or_nil, label}`.
 
   @densely_indexed [
     {2.3522, 48.8566, "Europe/Paris", "Paris"},
